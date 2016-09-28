@@ -3,6 +3,7 @@ module Main where
 import Command.Common
 import Command.Split
 import Command.Partition
+import Command.Cat
 
 import           ClassyPrelude.Conduit hiding ((<.>))
 import           Options.Applicative
@@ -10,7 +11,7 @@ import           Options.Applicative
 main :: IO ()
 main = do
   (opts, Command cmd) <- execParser parser
-  print (opts, cmd)
+  -- print (opts, cmd)
   runCommand opts cmd
   where
   parser = info (helper <*> ((,) <$> optsParser <*> cmdParser)) $ progDesc ""
@@ -26,6 +27,7 @@ cmdParser :: Parser Command
 cmdParser = subparser $ mconcat
   [ cmd "split" "Split into multiple files" splitParser
   , cmd "partition" "Partition for MapReduce" partitionParser
+  , cmd "cat" "Concatenate files, omitting extra headers" catParser
   ]
   where
   cmd name desc parser = command name $ info (helper <*> (Command <$> parser)) (progDesc desc)

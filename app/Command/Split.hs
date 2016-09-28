@@ -14,7 +14,7 @@ runSplit opts (CmdSplit key files) = do
   fk <- execKey opts key
   forM_ files $ \inFile -> runResourceT $
     sourceFile inFile $= linesUnboundedAsciiC $= decodeUtf8C $$
-    sinkMultiHeaders (toFile inFile . fk)
+    sinkMultiHeader (toFile inFile . fk)
     -- mapC (\s -> (fk $= unlinesC $$ stdoutC
   where
   -- source = if null files then stdinC else mapM_ sourceFile files

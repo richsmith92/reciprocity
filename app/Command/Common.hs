@@ -62,8 +62,8 @@ sinkMultiFile :: (IOData a, MonadIO m) => Sink (FilePath, a) m ()
 sinkMultiFile = mapM_C $ \(file, line) ->  liftIO $
   withBinaryFile file AppendMode (`hPutStrLn` line)
 
-sinkMultiHeaders :: (IOData a, MonadIO m) => (a -> FilePath) -> Sink a m ()
-sinkMultiHeaders toFile = await >>= maybe (return ())
+sinkMultiHeader :: (IOData a, MonadIO m) => (a -> FilePath) -> Sink a m ()
+sinkMultiHeader toFile = await >>= maybe (return ())
   (\header -> foldMC (go header) (mempty :: Set FilePath) >> return ())
   where
   go header files line = liftIO $ uncurry (withBinaryFile file) $ if
@@ -72,6 +72,14 @@ sinkMultiHeaders toFile = await >>= maybe (return ())
       \h -> hPutStrLn h header >> hPutStrLn h line >> return (insertSet file files))
     where
     file = toFile line
+
+sourceMultiHeader :: (MonadResource m) => [FilePath] -> Source m ByteString
+sourceMultiHeader = \case
+  [] -> return ()
+  (file:files) -> src file >> mapM_ (($= tailC) . src) files
+  where
+  src = ($= linesUnboundedAsciiC) . sourceFile
+  tailC = await >>= maybe (return ()) (const $ awaitForever yield)
 
 textOpt :: Textual s => (s -> a) -> Mod OptionFields a -> Parser a
 textOpt parse = option (parse . pack <$> str)
