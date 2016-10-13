@@ -2,7 +2,7 @@ module Command.Partition where
 
 import Command.Common
 
-import           ClassyPrelude.Conduit
+import           CustomPrelude
 import           Data.ByteString          (appendFile, elemIndex)
 import           Data.ByteString.Internal (c2w, w2c)
 import           Data.Text                (replace)
@@ -11,7 +11,7 @@ import System.IO (IOMode(..), withBinaryFile)
 import Data.List.Extra (groupSort)
 
 data CmdPartition = CmdPartition {
-  partitionBuckets    :: Int,
+  partitionBuckets    :: Natural,
   partitionTemplate   :: Text,
   partitionKey :: Key
   } deriving Show
@@ -23,7 +23,7 @@ instance IsCommand CmdPartition where
 
 partitionParser :: Parser CmdPartition
 partitionParser = do
-  partitionBuckets <- intOpt
+  partitionBuckets <- natOpt
     (short 'B' ++ long "buckets" ++ help "Number of buckets" ++ value 1)
   partitionKey <- keyOpt
   partitionTemplate <- argument (pack <$> str)
@@ -36,5 +36,5 @@ appendBucket Opts{..} template (bucket, rows) = withBinaryFile file AppendMode $
   where
   file = unpack $ replace optsReplaceStr (tshow bucket) template ++ ".gz"
 
-byBucket :: (ByteString -> ByteString) -> Int -> ByteString -> [(Int, [ByteString])]
-byBucket fk n s = groupSort [(1 + hash (fk r) `mod` n, r) | r <- lines' s]
+byBucket :: (ByteString -> ByteString) -> Natural -> ByteString -> [(Int, [ByteString])]
+byBucket fk n s = groupSort [(1 + hash (fk r) `mod` fromIntegral n, r) | r <- lines' s]

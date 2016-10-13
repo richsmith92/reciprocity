@@ -6,7 +6,7 @@ import Command.Partition
 import Command.Cat
 import Command.Merge
 
-import           ClassyPrelude.Conduit hiding ((<.>))
+import           CustomPrelude
 import           Options.Applicative
 
 main :: IO ()
@@ -25,11 +25,11 @@ optsParser = do
   return Opts{..}
 
 cmdParser :: Parser Command
-cmdParser = subparser $ mconcat
+cmdParser = subparser (mconcat
   [ cmd "split" "Split into multiple files" splitParser
   , cmd "partition" "Partition for MapReduce" partitionParser
-  , cmd "cat" "Concatenate files, omitting extra headers" catParser
   , cmd "merge" "Merge sorted headerless files" mergeParser
-  ]
+  ]) <|>
+  (Command <$> catParser)
   where
   cmd name desc parser = command name $ info (helper <*> (Command <$> parser)) (progDesc desc)

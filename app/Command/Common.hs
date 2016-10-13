@@ -1,14 +1,19 @@
 module Command.Common (module Command.Common, module Options.Applicative) where
 
-import           ClassyPrelude.Conduit hiding ((<.>))
+import           CustomPrelude
 import           Options.Applicative
-import Language.Haskell.Interpreter
-import           Data.ByteString          (appendFile, elemIndex)
+import qualified  Language.Haskell.Interpreter as Hint
 import           Data.ByteString.Internal (c2w, w2c)
 import           Data.Text                (replace)
 import Data.Conduit.Zlib (gzip)
 import System.IO (IOMode(..), withBinaryFile)
 import System.FilePath (splitExtension, addExtension)
+--
+-- class (Show a) => ToRec a where
+--   toRec :: a -> ByteString
+--   toRec = encodeUtf8 . tshow
+-- instance ToRecs ByteString where
+--   toRecs = (:[])
 
 class IsCommand c where
   runCommand :: Opts -> c -> IO ()
@@ -22,41 +27,49 @@ data Opts = Opts {
   optsReplaceStr :: Text
   } deriving (Show)
 
-type Fun = Text
-
-data SubRec = Field Int | FullRec
+data SubRec = Field Natural | FullRec
   deriving (Show)
 
 data Key = Key {
   keySubRec :: SubRec,
-  keyFun :: Fun
+  keyFun :: Text
 } deriving Show
+
+type StringLike a = (IsString a, IOData a, IsSequence a, Eq (Element a), Typeable a)
 
 keyOpt :: Parser Key
 keyOpt = do
-  sub <- subrec <$> intOpt (short 'k' ++ value 1 ++
+  sub <- subrec <$> natOpt (short 'k' ++ value 1 ++
     help "Key index (0 for whole record, default 1)")
   fun <- textOpt id (short 'f' ++ value "")
   return (Key sub fun)
   where
   subrec i = if i == 0 then FullRec else Field (pred i)
 
-type StringLike a = (IsString a, IOData a, IsSequence a, Eq (Element a), Typeable a)
+funOpt :: Mod OptionFields Text -> Parser Text
+funOpt mods = textOpt id (mods ++ metavar "FUN" ++ value "")
 
 execKey :: (MonadIO m, MonadMask m, StringLike a) => Opts -> Key -> m (a -> a)
-execKey opts Key{..} =  (. execSubRec opts keySubRec) <$> execFun keyFun
+execKey opts Key{..} =  (. execSubRec opts keySubRec) <$> execFun keyFun id
 
 execSubRec :: (StringLike a) => Opts -> SubRec -> a -> a
 execSubRec Opts{..} = \case
   FullRec -> id
-  Field i -> (`indexEx` i) . splitSeq (fromString $ unpack optsSep)
+  Field i -> (`indexEx` fromIntegral i) . splitSeq (fromString $ unpack optsSep)
 
-execFun :: (MonadIO m, MonadMask m, StringLike a) => Text -> m (a -> a)
-execFun "" = return id
-execFun expr = either (error . show) id <.> runInterpreter $ do
-  set [languageExtensions := [OverloadedStrings]]
-  setImports ["ClassyPrelude"]
-  interpret (unpack expr) id
+execFun :: (MonadIO m, MonadMask m, Typeable a) => Text -> a -> m (a)
+execFun "" x = return x
+execFun expr x = either (error . toMsg) id <.> Hint.runInterpreter $ do
+  Hint.set [Hint.languageExtensions Hint.:= [Hint.OverloadedStrings]]
+  Hint.setImportsQ [
+    ("ClassyPrelude.Conduit", Nothing),
+    ("Prelude", Just "P"),
+    ("Data.ByteString.Char8", Just "BC")]
+  Hint.interpret (unpack expr) x
+  where
+  toMsg = \case
+    Hint.WontCompile errs -> unlines $ cons "***Interpreter***" $ map Hint.errMsg errs
+    e -> show e
 
 sinkMultiFile :: (IOData a, MonadIO m) => Sink (FilePath, a) m ()
 sinkMultiFile = mapM_C $ \(file, line) ->  liftIO $
@@ -81,20 +94,11 @@ sourceMultiHeader = \case
   src = ($= linesUnboundedAsciiC) . sourceFile
   tailC = await >>= maybe (return ()) (const $ awaitForever yield)
 
+sourceFiles :: (MonadResource m) => [FilePath] -> Source m ByteString
+sourceFiles = mapM_ (\f -> sourceFile f .| linesUnboundedAsciiC)
+
 textOpt :: Textual s => (s -> a) -> Mod OptionFields a -> Parser a
 textOpt parse = option (parse . pack <$> str)
 
-intOpt :: Mod OptionFields Int -> Parser Int
-intOpt mods = option auto (mods ++ metavar "N")
-
-whenC :: Bool -> (a -> a) -> a -> a
-whenC b f = if b then f else id
-
--- | Point-free infix 'fmap'
-infixl 4 <.>
-(<.>) ::  Functor f => (b -> c) -> (a -> f b) -> a -> f c
-f <.> g = fmap f . g
-
-lines' :: ByteString -> [ByteString]
-lines' s = if null s then [] else
-  maybe [s] (\n -> let (x, y) = splitAt (n + 1) s in x : lines' y) $ elemIndex (c2w '\n') s
+natOpt :: Mod OptionFields Natural -> Parser Natural
+natOpt mods = option auto (mods ++ metavar "N")

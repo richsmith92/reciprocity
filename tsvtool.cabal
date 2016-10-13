@@ -22,14 +22,16 @@ executable tsvtool
   hs-source-dirs:      app
   main-is:             Main.hs
   ghc-options:         -threaded -rtsopts "-with-rtsopts=-N -A128M" -fno-warn-name-shadowing
-  build-depends:       base, classy-prelude-conduit, optparse-applicative, hint, bytestring, text, conduit-extra, filepath, extra, conduit-merge
+  build-depends:       base, classy-prelude-conduit, optparse-applicative, hint, bytestring, text, conduit-extra, filepath, extra, conduit-merge, directory, mono-traversable, lens, unordered-containers, double-conversion
   default-language:    Haskell2010
-  default-extensions: OverloadedStrings, LambdaCase, MultiWayIf, ScopedTypeVariables, FlexibleContexts, FlexibleInstances, RecordWildCards, ViewPatterns, TupleSections, ParallelListComp, DeriveDataTypeable, DeriveGeneric, PartialTypeSignatures, ApplicativeDo, TypeFamilies, NoMonomorphismRestriction, NoImplicitPrelude, GADTs, StandaloneDeriving, ConstraintKinds
+  default-extensions: OverloadedStrings, LambdaCase, MultiWayIf, ScopedTypeVariables, FlexibleContexts, FlexibleInstances, RecordWildCards, ViewPatterns, TupleSections, ParallelListComp, DeriveDataTypeable, DeriveGeneric, PartialTypeSignatures, ApplicativeDo, TypeFamilies, NoMonomorphismRestriction, NoImplicitPrelude, GADTs, StandaloneDeriving, RankNTypes, ConstraintKinds
   other-modules:
     Command.Cat
     Command.Common
+    Command.Merge
     Command.Partition
     Command.Split
+    CustomPrelude
 
 -- test-suite tsvtool-test
 --   type:                exitcode-stdio-1.0
