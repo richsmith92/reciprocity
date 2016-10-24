@@ -5,6 +5,7 @@ import           Command.Common
 import           System.FilePath       (addExtension, splitExtension)
 import Data.NonNull
 import qualified Language.Haskell.Interpreter as Hint
+import           System.Directory      (getHomeDirectory)
 
 data CmdCat = CmdCat {
   catInputs :: [FilePath],
@@ -21,15 +22,18 @@ instance IsCommand CmdCat where
 exprC :: (MonadIO m, Typeable m) => Opts -> CmdCat -> Conduit Text m Text
 exprC Opts{..} CmdCat{..} = do
   when optsHeader $ takeC 1
-  c <- withInterpreter $ Hint.interpret (unpack catExpr) (awaitForever yield)
+  c <- if
+    | null catExpr -> return $ awaitForever yield
+    | otherwise -> withInterpreter $ Hint.interpret (unpack catExpr) (awaitForever yield)
   c
 
 
 -- withInterpreter :: (MonadIO m, MonadMask m, Typeable a) => Text -> a -> m (a)
 -- withInterpreter "" x = return x
 withInterpreter m = either (error . toMsg) id <.> liftIO $ Hint.runInterpreter $ do
+  homeDir <- liftIO getHomeDirectory
   Hint.set [Hint.languageExtensions Hint.:= [Hint.OverloadedStrings]]
-  Hint.loadModules ["UserPrelude.hs"]
+  Hint.loadModules [homeDir </> ".tsvtool/UserPrelude.hs"]
   Hint.setImportsQ [
     ("UserPrelude", Nothing),
     ("Prelude", Just "P")]
