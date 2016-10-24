@@ -1,0 +1,18 @@
+#!/bin/bash
+
+mapper=$1
+reducer=$2
+output=$3
+inputs=${@:4}
+
+NM=$(nproc)
+NR=$NM
+
+mkdir $output || exit 1
+seq $NR | parallel mkdir -p $output/map/{}
+
+time find $inputs -maxdepth 1 -type f | \
+  parallel --nice=20 -j$NM cat {} \| $mapper \| sort \| tsvtool partition -B$NR $output/map/%s/{/.}
+find $output/map -empty -delete
+time ls $output/map/ | \
+  parallel --nice=20 tsvtool merge $output/map/{}/*.gz \| $reducer \| gzip \> $output/{}.gz
