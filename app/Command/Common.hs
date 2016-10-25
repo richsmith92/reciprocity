@@ -8,6 +8,8 @@ import           Data.Text                (replace)
 import Data.Conduit.Zlib (gzip)
 import System.IO (IOMode(..), withBinaryFile)
 import System.FilePath (splitExtension, addExtension)
+import Data.Conduit.Zlib (ungzip)
+
 --
 -- class (Show a) => ToRec a where
 --   toRec :: a -> ByteString
@@ -95,7 +97,14 @@ sourceMultiHeader = \case
   tailC = await >>= maybe (return ()) (const $ awaitForever yield)
 
 sourceFiles :: (MonadResource m) => [FilePath] -> Source m ByteString
-sourceFiles = mapM_ (\f -> sourceFile f .| linesUnboundedAsciiC)
+sourceFiles = mapM_ sourceDecompress
+
+sourceDecompress :: (MonadResource m) => FilePath -> Source m ByteString
+sourceDecompress file = sourceFile file .| decompress .| linesUnboundedAsciiC
+  where
+  decompress = if
+    | ".gz" `isSuffixOf` file -> ungzip
+    | otherwise -> awaitForever yield
 
 textOpt :: Textual s => (s -> a) -> Mod OptionFields a -> Parser a
 textOpt parse = option (parse . pack <$> str)

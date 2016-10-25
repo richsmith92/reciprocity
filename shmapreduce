@@ -5,8 +5,8 @@ reducer=$2
 output=$3
 inputs=${@:4}
 
-NM=$(nproc)
-NR=$NM
+if [ -z $NM ]; then NM=$(nproc); fi
+if [ -z $NR ]; then NR=$(nproc); fi
 
 mkdir $output || exit 1
 seq $NR | parallel mkdir -p $output/map/{}

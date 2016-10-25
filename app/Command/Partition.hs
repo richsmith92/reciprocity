@@ -27,7 +27,7 @@ partitionParser = do
     (short 'B' ++ long "buckets" ++ help "Number of buckets" ++ value 1)
   partitionKey <- keyOpt
   partitionTemplate <- argument (pack <$> str)
-    (metavar "OUT_TEMPLATE" ++ help "Output files template")
+    (metavar "OUT_TEMPLATE" ++ help "Output filepath template")
   return CmdPartition{..}
 
 appendBucket :: Opts -> Text -> (Int, [ByteString]) -> IO ()
