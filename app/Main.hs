@@ -5,6 +5,7 @@ import Command.Split
 import Command.Partition
 import Command.Cat
 import Command.Merge
+import Command.Join
 
 import           CustomPrelude
 import           Options.Applicative
@@ -29,6 +30,7 @@ cmdParser = subparser (mconcat
   [ cmd "split" "Split into multiple files" splitParser
   , cmd "partition" "Partition for MapReduce" partitionParser
   , cmd "merge" "Merge sorted headerless files" mergeParser
+  , cmd "join" "Join sorted headerless files on key" joinParser
   ]) <|>
   (Command <$> catParser)
   where

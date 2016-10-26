@@ -13,11 +13,11 @@ import Data.List.Extra (groupSort)
 data CmdPartition = CmdPartition {
   partitionBuckets    :: Natural,
   partitionTemplate   :: Text,
-  partitionKey :: Key
+  partitionKey :: SubRec
   } deriving Show
 instance IsCommand CmdPartition where
   runCommand opts CmdPartition{..} = do
-    fk <- execKey opts partitionKey
+    let fk = execSubRec opts partitionKey
     buckets <- byBucket fk partitionBuckets <$> hGetContents stdin
     mapM_ (appendBucket opts partitionTemplate) buckets
 
