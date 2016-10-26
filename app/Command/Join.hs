@@ -36,8 +36,10 @@ instance IsCommand CmdJoin where
 -- TEST: joinSources (CL.sourceList [1,3..10 :: Int]) (CL.sourceList [1..5]) $$ CL.mapM_ print
 joinSources :: (Ord a, Monad m, StringLike a) => Opts -> CmdJoin -> Source m a -> Source m a -> Source m (a, These a a)
 joinSources opts CmdJoin{..} (ConduitM left0) (ConduitM right0) = ConduitM $ \rest -> let
-  go (Done ()) r = CI.mapOutput (fk &&& That . fv) r >> rest ()
-  go l (Done ()) = CI.mapOutput (fk &&& This . fv) l >> rest ()
+  -- go (Done ()) r = CI.mapOutput (fk &&& That . fv) r >> rest ()
+  -- go l (Done ()) = CI.mapOutput (fk &&& This . fv) l >> rest ()
+  go (Done ()) r = rest ()
+  go l (Done ()) = rest ()
   go (Leftover left ()) right = go left right
   go left (Leftover right ())  = go left right
   go (NeedInput _ c) right = go (c ()) right
@@ -51,8 +53,10 @@ joinSources opts CmdJoin{..} (ConduitM left0) (ConduitM right0) = ConduitM $ \re
     v1 = fv s1
     v2 = fv s2
     in case compare k1 k2 of
-      LT -> HaveOutput (go srcx ys) closex $ (k1, This v1)
-      GT -> HaveOutput (go xs srcy) closey $ (k2, That v2)
+      -- LT -> HaveOutput (go srcx ys) closex $ (k1, This v1)
+      -- GT -> HaveOutput (go xs srcy) closey $ (k2, That v2)
+      LT -> go srcx ys
+      GT -> go xs srcy
       EQ -> HaveOutput (go srcx srcy) (closex >> closey) (k1, These v1 v2)
   in go (left0 Done) (right0 Done)
   where
