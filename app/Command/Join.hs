@@ -2,40 +2,38 @@ module Command.Join where
 
 import           CustomPrelude
 import           Command.Common
-import           System.FilePath       (addExtension, splitExtension)
 
+import           System.FilePath       (addExtension, splitExtension)
 import           Data.ByteString.Internal (c2w, w2c)
 import           Data.These      (These (..), justThese)
-
 import           Data.Conduit.Internal        (ConduitM (..), Pipe (..))
 import qualified Data.Conduit.Internal        as CI
 
-joinParser = do
-  joinKey <- keyOpt
-  joinValue <- valueOpt
-  joinFiles <- many $ strArgument (metavar "INPUT")
-  return (CmdJoin{..})
-
 data CmdJoin = CmdJoin {
-  joinKey :: SubRec,
-  joinValue :: SubRec,
-  joinFiles :: [FilePath]
+  joinValue :: SubRec
   } deriving (Show)
 
 instance IsCommand CmdJoin where
   runCommand opts@Opts{..} cmd@CmdJoin{..} = do
-    let [s1, s2] = map sourceDecompress joinFiles
-    runConduitRes $ joinSources opts cmd s1 s2 .| concatMapC (uncurry out) .| unlinesAsciiC .| stdoutC
+    let [s1, s2] = inputSources opts
+    runConduitRes $ joinSources (execKey opts) (execSubRec opts joinValue) combine s1 s2 .| stdoutSink
     where
-    out k = combine k <.> justThese
-    combine = case joinKey of
-      [] -> const
-      _ -> \k (v1, v2) -> k ++ sep ++ v1 ++ sep ++ v2
+    combine = case optsKey of
+      [] -> \k _ _ -> k
+      _ -> \k v1 v2 -> k ++ sep ++ v1 ++ sep ++ v2
     sep = fromString (unpack optsSep)
 
+  commandInfo = CmdInfo {
+    cmdDesc = "Join ordered headerless inputs on common key",
+    cmdParser = do
+      joinValue <- valueOpt
+      return (CmdJoin{..})
+    }
+
 -- TEST: joinSources (CL.sourceList [1,3..10 :: Int]) (CL.sourceList [1..5]) $$ CL.mapM_ print
-joinSources :: (Ord a, Monad m, StringLike a) => Opts -> CmdJoin -> Source m a -> Source m a -> Source m (a, These a a)
-joinSources opts CmdJoin{..} (ConduitM left0) (ConduitM right0) = ConduitM $ \rest -> let
+joinSources :: (Ord k, Monad m, StringLike a)
+  => (a -> k) -> (a -> v) -> (k -> v -> v -> b) -> Source m a -> Source m a -> Source m b
+joinSources fk fv combine (ConduitM left0) (ConduitM right0) = ConduitM $ \rest -> let
   -- go (Done ()) r = CI.mapOutput (fk &&& That . fv) r >> rest ()
   -- go l (Done ()) = CI.mapOutput (fk &&& This . fv) l >> rest ()
   go (Done ()) r = rest ()
@@ -57,8 +55,5 @@ joinSources opts CmdJoin{..} (ConduitM left0) (ConduitM right0) = ConduitM $ \re
       -- GT -> HaveOutput (go xs srcy) closey $ (k2, That v2)
       LT -> go srcx ys
       GT -> go xs srcy
-      EQ -> HaveOutput (go srcx srcy) (closex >> closey) (k1, These v1 v2)
+      EQ -> HaveOutput (go srcx srcy) (closex >> closey) (combine k1 v1 v2)
   in go (left0 Done) (right0 Done)
-  where
-  fk = execSubRec opts joinKey
-  fv = execSubRec opts joinValue

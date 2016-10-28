@@ -12,26 +12,29 @@ import           Options.Applicative
 
 main :: IO ()
 main = do
-  (opts, Command cmd) <- execParser parser
+  (Command cmd, opts) <- execParser parser
   -- print (opts, cmd)
   runCommand opts cmd
   where
-  parser = info (helper <*> ((,) <$> optsParser <*> cmdParser)) $ progDesc ""
+  parser = info (helper <*> optsParser) $ progDesc ""
 
-optsParser :: Parser Opts
+optsParser :: Parser (Command, Opts)
 optsParser = do
-  optsSep <- textOpt id (short 'd' ++ help "Delimiter" ++ value "\t")
-  optsHeader <- switch (short 'H' ++ help "There is a header row")
+  optsSep <- textOpt id (short 'd' ++ help "Delimiter (default is TAB)" ++ value "\t")
+  optsHeader <- switch (short 'H' ++ help "Assume header row in each input")
   optsReplaceStr <- option (pack <$> str) (long "replacement-string" ++ value "%s")
-  return Opts{..}
+  optsKey <- keyOpt
+  cmd <- commandParser
+  optsInputs <- many (strArgument (metavar "INPUT"))
+  return (cmd, Opts{..})
 
-cmdParser :: Parser Command
-cmdParser = subparser (mconcat
-  [ cmd "split" "Split into multiple files" splitParser
-  , cmd "partition" "Partition for MapReduce" partitionParser
-  , cmd "merge" "Merge sorted headerless files" mergeParser
-  , cmd "join" "Join sorted headerless files on key" joinParser
-  ]) <|>
-  (Command <$> catParser)
+commandParser :: Parser Command
+commandParser = subparser (mconcat
+  [ sub "split" (commandInfo :: CmdInfo CmdSplit)
+  , sub "partition" (commandInfo :: CmdInfo CmdPartition)
+  , sub "merge"  (commandInfo :: CmdInfo CmdMerge)
+  , sub "join" (commandInfo :: CmdInfo CmdJoin)
+  , sub "cat" (commandInfo :: CmdInfo CmdCat)
+  ])
   where
-  cmd name desc parser = command name $ info (helper <*> (Command <$> parser)) (progDesc desc)
+  sub name (CmdInfo desc parser) = command name $ info (helper <*> (Command <$> parser)) (progDesc $ unpack desc)

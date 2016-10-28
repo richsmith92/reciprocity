@@ -5,20 +5,15 @@ import           Command.Common
 import           System.FilePath       (addExtension, splitExtension)
 import Data.Conduit.Merge
 
-mergeParser = do
-  mergeKey <- keyOpt
-  mergeFiles <- many $ strArgument (metavar "INPUT")
-  return (CmdMerge{..})
-
-data CmdMerge = CmdMerge {
-  mergeKey :: SubRec,
-  mergeFiles :: [FilePath]
-  } deriving (Show)
+data CmdMerge = CmdMerge deriving (Show)
 
 instance IsCommand CmdMerge where
-  runCommand opts (CmdMerge key files) = do
-    runConduitRes $ merge (map sourceDecompress files) .| unlinesAsciiC .| stdoutC
+  commandInfo = CmdInfo {
+    cmdDesc = "Merge ordered inputs into ordered output",
+    cmdParser = pure CmdMerge
+    }
+  runCommand opts@Opts{..} _ = runConduitRes $ withInputSourcesH opts merge .| stdoutSink
     where
-    merge = case key of
+    merge = case optsKey of
       [] -> mergeSources
-      _ -> mergeSourcesOn $ execSubRec opts key
+      _ -> mergeSourcesOn $ execKey opts

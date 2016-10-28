@@ -12,20 +12,22 @@ import Data.List.Extra (groupSort)
 
 data CmdPartition = CmdPartition {
   partitionBuckets    :: Natural,
-  partitionTemplate   :: Text,
-  partitionKey :: SubRec
+  partitionTemplate   :: Text
   } deriving Show
 instance IsCommand CmdPartition where
   runCommand opts CmdPartition{..} = do
-    let fk = execSubRec opts partitionKey
-    buckets <- byBucket fk partitionBuckets <$> hGetContents stdin
+    recs <- runConduitRes $ catInputSources opts .| sinkList
+    let buckets = byBucket (execKey opts) partitionBuckets recs
     mapM_ (appendBucket opts partitionTemplate) buckets
+  commandInfo = CmdInfo {
+    cmdDesc = "Partition for MapReduce: split headerless input into N buckets determined by hash of the key",
+    cmdParser = partitionParser
+    }
 
 partitionParser :: Parser CmdPartition
 partitionParser = do
   partitionBuckets <- natOpt
     (short 'B' ++ long "buckets" ++ help "Number of buckets" ++ value 1)
-  partitionKey <- keyOpt
   partitionTemplate <- argument (pack <$> str)
     (metavar "OUT_TEMPLATE" ++ help "Output filepath template")
   return CmdPartition{..}
@@ -36,5 +38,5 @@ appendBucket Opts{..} template (bucket, rows) = withBinaryFile file AppendMode $
   where
   file = unpack $ replace optsReplaceStr (tshow bucket) template ++ ".gz"
 
-byBucket :: (ByteString -> ByteString) -> Natural -> ByteString -> [(Int, [ByteString])]
-byBucket fk n s = groupSort [(1 + hash (fk r) `mod` fromIntegral n, r) | r <- lines' s]
+byBucket :: (ByteString -> ByteString) -> Natural -> [ByteString] -> [(Int, [ByteString])]
+byBucket fk n recs = groupSort [(1 + hash (fk r) `mod` fromIntegral n, r) | r <- recs]

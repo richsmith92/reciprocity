@@ -9,7 +9,7 @@ import Data.Conduit.Zlib (gzip)
 import System.IO (IOMode(..), withBinaryFile)
 import System.FilePath (splitExtension, addExtension)
 import Data.Conduit.Zlib (ungzip)
-
+import qualified Data.ByteString.Char8 as BC
 --
 -- class (Show a) => ToRec a where
 --   toRec :: a -> ByteString
@@ -17,8 +17,14 @@ import Data.Conduit.Zlib (ungzip)
 -- instance ToRecs ByteString where
 --   toRecs = (:[])
 
+data CmdInfo c = CmdInfo {
+  cmdDesc :: Text,
+  cmdParser :: Parser c
+  }
+
 class IsCommand c where
   runCommand :: Opts -> c -> IO ()
+  commandInfo :: CmdInfo c
 
 data Command = forall a. (Show a, IsCommand a) => Command a
 deriving instance Show Command
@@ -26,7 +32,9 @@ deriving instance Show Command
 data Opts = Opts {
   optsSep :: Text,
   optsHeader :: Bool,
-  optsReplaceStr :: Text
+  optsReplaceStr :: Text,
+  optsKey :: SubRec,
+  optsInputs :: [FilePath]
   } deriving (Show)
 
 -- data SubRec = Fields [Natural] | FullRec
@@ -41,6 +49,9 @@ type StringLike a = (IsString a, IOData a, IsSequence a, Eq (Element a), Typeabl
 
 type SubRec = [Pair Natural]
 
+execKey :: StringLike a => Opts -> a -> a
+execKey opts = execSubRec opts (optsKey opts)
+
 execSubRec :: (StringLike a) => Opts -> SubRec -> a -> a
 execSubRec Opts{..} = \case
   [] -> id
@@ -49,38 +60,78 @@ execSubRec Opts{..} = \case
   subrec (i, j) = take (j - i + 1) . drop (i - 1)
   sep = fromString (unpack optsSep)
 
+-- * Producers
+
+inputSources :: MonadResource m => Opts -> [Source m ByteString]
+inputSources Opts{..} = case optsInputs of
+  [] -> [stdinC]
+  inputs -> map inputSource inputs
+
+inputFiles :: Opts -> [FilePath]
+inputFiles Opts{..} = case optsInputs of
+  [] -> [""]
+  inputs -> replaceElem "-" "" inputs
+
+withInputSourcesH :: MonadResource m
+  => Opts -> ([Source m ByteString] -> Source m ByteString) -> Source m ByteString
+withInputSourcesH opts@Opts{..} combine = if
+  | optsHeader, (source1:sources@(_:_)) <- inputSources opts -> do
+    (resumable, header) <- lift $ source1 $$+ headC
+    yieldMany header
+    (tail1, finalize) <- lift $ unwrapResumable resumable
+    combine $ tail1 : map (.| tailC) sources
+    lift finalize
+  | otherwise -> combine $ inputSources opts
+
+catInputSources :: MonadResource m => Opts -> Source m ByteString
+catInputSources opts@Opts{..} = if
+  | optsHeader, (source1:sources@(_:_)) <- inputSources opts -> source1 >> mapM_ (.| tailC) sources
+  | otherwise -> sequence_ $ inputSources opts
+
+catHFiles :: (MonadResource m) => [FilePath] -> Source m ByteString
+catHFiles = \case
+  [] -> return ()
+  (file:files) -> inputSource file >> mapM_ sourceDropHeader files
+
+sourceDropHeader :: (MonadResource m) => FilePath -> Source m ByteString
+sourceDropHeader file = inputSource file .| tailC
+
+inputSource :: (MonadResource m) => FilePath -> Source m ByteString
+inputSource file = source .| linesUnboundedAsciiC
+  where
+  source = if
+    | file == "-" -> stdinC
+    | ".gz" `isSuffixOf` file -> sourceFile file .| ungzip
+    | otherwise -> sourceFile file
+
+-- * Transformers
+
+tailC :: Monad m => Conduit a m a
+tailC = await >>= maybe (return ()) (const $ awaitForever yield)
+
+-- * Consumers
+
 sinkMultiFile :: (IOData a, MonadIO m) => Sink (FilePath, a) m ()
 sinkMultiFile = mapM_C $ \(file, line) ->  liftIO $
   withBinaryFile file AppendMode (`hPutStrLn` line)
 
-sinkMultiHeader :: (IOData a, MonadIO m) => (a -> FilePath) -> Sink a m ()
-sinkMultiHeader toFile = await >>= maybe (return ())
-  (\header -> foldMC (go header) (mempty :: Set FilePath) >> return ())
+splitSink :: (MonadIO m) => Opts -> FilePath -> Sink ByteString m ()
+splitSink opts inFile = if optsHeader opts then await >>= sink else sink Nothing
   where
-  go header files line = liftIO $ uncurry (withBinaryFile file) $ if
+  sink (mheader :: Maybe ByteString) = foldMC (go mheader) (mempty :: Set FilePath) >> return ()
+  fk = execKey opts
+  (base, ext) = splitExtension inFile
+  toFile line = base +? BC.unpack (fk line) +? ext
+  x +? y = if null x then y else if null y then x else x ++ "." ++ y
+  go mheader files line = liftIO $ uncurry (withBinaryFile file) $ if
     | file `member` files -> (AppendMode , \h -> hPutStrLn h line >> return files)
     | otherwise -> (WriteMode,
-      \h -> hPutStrLn h header >> hPutStrLn h line >> return (insertSet file files))
+      \h -> traverse_ (hPutStrLn h) mheader >> hPutStrLn h line >> return (insertSet file files))
     where
     file = toFile line
 
-sourceMultiHeader :: (MonadResource m) => [FilePath] -> Source m ByteString
-sourceMultiHeader = \case
-  [] -> return ()
-  (file:files) -> src file >> mapM_ (($= tailC) . src) files
-  where
-  src = ($= linesUnboundedAsciiC) . sourceFile
-  tailC = await >>= maybe (return ()) (const $ awaitForever yield)
-
-sourceFiles :: (MonadResource m) => [FilePath] -> Source m ByteString
-sourceFiles = mapM_ sourceDecompress
-
-sourceDecompress :: (MonadResource m) => FilePath -> Source m ByteString
-sourceDecompress file = sourceFile file .| decompress .| linesUnboundedAsciiC
-  where
-  decompress = if
-    | ".gz" `isSuffixOf` file -> ungzip
-    | otherwise -> awaitForever yield
+stdoutSink :: (MonadIO m) => Consumer ByteString m ()
+stdoutSink = unlinesAsciiC .| stdoutC
 
 type OptParser a = Mod OptionFields a -> Parser a
 textOpt :: Textual s => (s -> a) -> OptParser a
