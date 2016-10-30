@@ -1,14 +1,9 @@
 module Main where
 
-import Command.Common
-import Command.Split
-import Command.Partition
-import Command.Cat
-import Command.Merge
-import Command.Join
-
+import Lib.Base
+import Lib.Command.Base
+import Lib.Command.Builtin
 import           CustomPrelude
-import           Options.Applicative
 
 main :: IO ()
 main = do

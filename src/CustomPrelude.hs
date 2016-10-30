@@ -25,11 +25,12 @@ import System.Directory as R (createDirectoryIfMissing, doesFileExist, removeFil
 import System.FilePath  as R (dropExtension, splitExtension, takeBaseName,
                               takeDirectory, takeExtension, takeFileName)
 
--- import Control.Concurrent.ParallelIO.Global as R (parallel, parallel_)
+read :: (Read a, Textual s) => s -> a
+read s = fromMaybe (error $ "read: " ++ unpack s) $ readMay s
 
 type Pair a = (a, a)
 
-showTsv, showTsvLn :: (IsString s, IsSequence s, Eq (Element s)) => [s] -> s
+showTsv, showTsvLn :: (IsString s, IsSequence s) => [s] -> s
 showTsv = intercalate "\t"
 showTsvLn = (++ "\n") . intercalate "\t"
 
@@ -37,7 +38,7 @@ showTsvLn = (++ "\n") . intercalate "\t"
 readTsv :: (IsString s, IsSequence s, Eq (Element s)) => s -> [s]
 readTsv = splitSeq "\t"
 
-readTsvLines :: (Textual s, IsSequence s, Eq (Element s)) => s -> [[s]]
+readTsvLines :: (Textual s, Eq (Element s)) => s -> [[s]]
 readTsvLines = map readTsv . lines
 
 showTsvLines :: (IsString s, IsSequence s, Eq (Element s)) => [[s]] -> s
