@@ -8,7 +8,8 @@ data CmdSplit = CmdSplit
   deriving (Show)
 instance IsCommand CmdSplit where
   runCommand opts (CmdSplit) = sequence_ $
-    zipWith (\file source -> runConduitRes $ source .| splitSink opts file) (inputFiles opts) (inputSources opts)
+    zipWith (\file source -> runConduitRes $ source .| linesC .| splitSink opts file)
+      (inputFiles opts) (inputSources opts)
 
   commandInfo = CmdInfo {
     cmdDesc = "Split into multiple files: put records having key KEY into file INPUT.KEY",

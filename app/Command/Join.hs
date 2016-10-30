@@ -2,10 +2,8 @@ module Command.Join where
 
 import           CustomPrelude
 import           Command.Common
-
--- import           System.FilePath       (addExtension, splitExtension)
--- import           Data.ByteString.Internal (c2w, w2c)
--- import           Data.These      (These (..), justThese)
+import           Data.Conduit.Internal        (ConduitM (..), Pipe (..))
+import qualified Data.Conduit.Internal        as CI
 
 data CmdJoin = CmdJoin {
   joinValue :: SubRec
@@ -13,12 +11,14 @@ data CmdJoin = CmdJoin {
 
 instance IsCommand CmdJoin where
   runCommand opts@Opts{..} cmd@CmdJoin{..} = do
-    let [s1, s2] = inputSources opts
-    runConduitRes $ joinSources (execKey opts) (execSubRec opts joinValue) combine s1 s2 .| stdoutSink
+    let [s1, s2] = [s .| linesCE | s <- inputSources opts]
+    -- runConduitRes $ joinSources (execKey opts) (execSubRec opts joinValue) [s1, s2] .|
+    runConduitRes $ joinSources (execKey opts) (execSubRec opts joinValue) combine [s1, s2] .|
+      unlinesCE .| stdoutC
     where
     combine = case optsKey of
-      [] -> \k _ _ -> k
-      _ -> \k v1 v2 -> k ++ sep ++ v1 ++ sep ++ v2
+      [] -> headEx
+      _ -> intercalate sep
     sep = fromString (unpack optsSep)
 
   commandInfo = CmdInfo {

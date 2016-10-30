@@ -8,6 +8,7 @@ module CustomPrelude (module CustomPrelude, module R) where
 
 import ClassyPrelude.Conduit               as R hiding ((<.>))
 import Control.Lens as R hiding ((<.>), (<&>), (<|), uncons,unsnoc, cons,snoc, index, Index, enum, argument)
+import Control.Arrow as R ((>>>), (<<<))
 
 import Data.ByteString.Internal    as R (c2w, w2c)
 import           Data.ByteString          (appendFile, elemIndex)

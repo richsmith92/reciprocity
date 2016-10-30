@@ -12,7 +12,7 @@ data CmdCat = CmdCat {
   } deriving (Show)
 instance IsCommand CmdCat where
   runCommand opts@Opts{..} cmd@CmdCat{..} = runConduitRes $
-    catInputSources opts .| decodeUtf8C .| exprC opts cmd .| encodeUtf8C .| stdoutSink
+    catInputSources opts .| linesC .| decodeUtf8C .| exprC opts cmd .| encodeUtf8C .| stdoutSink
   commandInfo = CmdInfo {
     cmdDesc = "Concatenate inputs and run given expression on them",
     cmdParser = do
