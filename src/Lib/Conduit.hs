@@ -2,18 +2,18 @@
 
 module Lib.Conduit where
 
+import CustomPrelude
 import Lib.Base
-import           CustomPrelude
 
-import Data.Conduit.Zlib (ungzip)
-import System.IO (IOMode(..), withBinaryFile)
 import qualified Data.ByteString.Char8 as BC
-import qualified Data.Conduit.Binary as CB
+import qualified Data.Conduit.Binary   as CB
+import           Data.Conduit.Zlib     (ungzip)
+import           System.IO             (IOMode (..), withBinaryFile)
 -- import Control.Monad.Trans.Maybe (MaybeT(..))
 -- import qualified Data.Vector as V
 
-import           Data.Conduit.Internal        (ConduitM (..), Pipe (..))
-import qualified Data.Conduit.Internal        as CI
+import           Data.Conduit.Internal (ConduitM (..), Pipe (..))
+import qualified Data.Conduit.Internal as CI
 
 -- * Producers
 
@@ -27,12 +27,12 @@ inputSource file = source .| lineChunksC
 
 inputSources :: MonadResource m => Opts -> [Source m ByteString]
 inputSources Opts{..} = case optsInputs of
-  [] -> [stdinC .| lineChunksC]
+  []     -> [stdinC .| lineChunksC]
   inputs -> map inputSource inputs
 
 inputFiles :: Opts -> [FilePath]
 inputFiles Opts{..} = case optsInputs of
-  [] -> [""]
+  []     -> [""]
   inputs -> replaceElem "-" "" inputs
 
 withInputSourcesH :: MonadResource m

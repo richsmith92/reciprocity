@@ -1,13 +1,13 @@
 module Lib.Command.Base (module Lib.Command.Base, module Options.Applicative, module Lib.Conduit) where
 
-import Lib.Conduit
+import CustomPrelude
 import Lib.Base
-import           CustomPrelude
+import Lib.Conduit
 
-import           Options.Applicative hiding ((<>))
+import Options.Applicative hiding ((<>))
 
 data CmdInfo c = CmdInfo {
-  cmdDesc :: Text,
+  cmdDesc   :: Text,
   cmdParser :: Parser c
   }
 

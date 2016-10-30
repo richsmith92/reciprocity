@@ -1,17 +1,17 @@
 module Lib.Command.Builtin where
 
-import Lib.Command.Base
+import CustomPrelude
 import Lib.Base
-import           CustomPrelude
+import Lib.Command.Base
 -- import Data.NonNull
 import qualified Language.Haskell.Interpreter as Hint
-import           System.Directory      (getHomeDirectory)
+import           System.Directory             (getHomeDirectory)
 
-import Data.Text                (replace)
-import Data.Conduit.Zlib (gzip)
-import System.IO (IOMode(..), withBinaryFile)
-import Data.List.Extra (groupSort)
 import Data.Conduit.Merge
+import Data.Conduit.Zlib  (gzip)
+import Data.List.Extra    (groupSort)
+import Data.Text          (replace)
+import System.IO          (IOMode (..), withBinaryFile)
 
 -- * Cat
 
@@ -64,7 +64,7 @@ instance IsCommand CmdJoin where
     where
     combine = case optsKey of
       [] -> headEx
-      _ -> intercalate sep
+      _  -> intercalate sep
     sep = fromString (unpack optsSep)
 
   commandInfo = CmdInfo {
@@ -87,7 +87,7 @@ instance IsCommand CmdMerge where
     where
     merge = case optsKey of
       [] -> mergeSources
-      _ -> mergeSourcesOn $ execKey opts
+      _  -> mergeSourcesOn $ execKey opts
 
 -- * Split
 
@@ -106,8 +106,8 @@ instance IsCommand CmdSplit where
 -- * Partition
 
 data CmdPartition = CmdPartition {
-  partitionBuckets    :: Natural,
-  partitionTemplate   :: Text
+  partitionBuckets  :: Natural,
+  partitionTemplate :: Text
   } deriving Show
 instance IsCommand CmdPartition where
   runCommand opts CmdPartition{..} = do

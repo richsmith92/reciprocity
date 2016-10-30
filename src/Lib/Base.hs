@@ -1,13 +1,13 @@
 module Lib.Base where
 
-import           CustomPrelude
+import CustomPrelude
 
 data Opts = Opts {
-  optsSep :: Text,
-  optsHeader :: Bool,
+  optsSep        :: Text,
+  optsHeader     :: Bool,
   optsReplaceStr :: Text,
-  optsKey :: SubRec,
-  optsInputs :: [FilePath]
+  optsKey        :: SubRec,
+  optsInputs     :: [FilePath]
   } deriving (Show)
 
 type StringLike a = (IsString a, IOData a, IsSequence a, Eq (Element a), Typeable a)

@@ -6,24 +6,25 @@
 
 module CustomPrelude (module CustomPrelude, module R) where
 
-import ClassyPrelude.Conduit               as R hiding ((<.>))
-import Control.Lens as R hiding ((<.>), (<&>), (<|), uncons,unsnoc, cons,snoc, index, Index, enum, argument)
-import Control.Arrow as R ((>>>), (<<<))
+import ClassyPrelude.Conduit as R hiding ((<.>))
+import Control.Arrow         as R ((<<<), (>>>))
+import Control.Lens          as R hiding (Index, argument, cons, enum, index, snoc, uncons, unsnoc,
+                                   (<&>), (<.>), (<|))
 
-import Data.ByteString.Internal    as R (c2w, w2c)
+import qualified Control.Category         as Cat
 import           Data.ByteString          (appendFile, elemIndex)
-import qualified Control.Category as Cat
+import           Data.ByteString.Internal as R (c2w, w2c)
 
-import Data.Data                   as R (Data)
-import Data.Function               as R (fix, (&))
-import Data.List                   as R (foldl1, foldr1, nub)
-import Extra                       as R (dupe, groupOn, groupSort, groupSortOn)
+import Data.Data     as R (Data)
+import Data.Function as R (fix, (&))
+import Data.List     as R (foldl1, foldr1, nub)
+import Extra         as R (dupe, groupOn, groupSort, groupSortOn)
 
 import Numeric.Natural as R
 
-import System.Directory as R (createDirectoryIfMissing, doesFileExist, removeFile, getHomeDirectory)
-import System.FilePath  as R (dropExtension, splitExtension, takeBaseName,
-                              takeDirectory, takeExtension, takeFileName)
+import System.Directory as R (createDirectoryIfMissing, doesFileExist, getHomeDirectory, removeFile)
+import System.FilePath  as R (dropExtension, splitExtension, takeBaseName, takeDirectory,
+                              takeExtension, takeFileName)
 
 read :: (Read a, Textual s) => s -> a
 read s = fromMaybe (error $ "read: " ++ unpack s) $ readMay s
@@ -103,7 +104,7 @@ breakOnParts (sep:seps) (x:xs) = if x == sep then [] : breakOnParts seps xs
   else let (part:parts) = breakOnParts (sep:seps) xs in (x : part) : parts
 
 fromRight :: Either String a -> a
-fromRight (Left s) = error s
+fromRight (Left s)  = error s
 fromRight (Right x) = x
 --
 -- parallelMapM :: (a -> IO b) -> [a] -> IO [b]
