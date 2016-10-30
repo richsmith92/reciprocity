@@ -60,9 +60,9 @@ sourceDropHeader file = inputSource file .| tailC
 joinLists :: forall a k b. (Ord k) => (a -> k) -> (a -> k) ->  ([k] -> b) -> [a] -> [a] -> (Seq b, ([a], [a]))
 joinLists key val combine xs ys = go (mempty :: Seq b) (map key xs) (map key ys) xs ys
   where
-  go acc _ _ [] leftover = (acc, ([], leftover))
-  go acc _ _ leftover [] = (acc, (leftover, []))
-  go acc ks1@(k1:ks1') ks2@(k2:ks2') recs1@(r1:recs1') recs2@(r2:recs2') = case compare k1 k2 of
+  go !acc _ _ [] leftover = (acc, ([], leftover))
+  go !acc _ _ leftover [] = (acc, (leftover, []))
+  go !acc ks1@(!k1:ks1') ks2@(!k2:ks2') recs1@(r1:recs1') recs2@(r2:recs2') = case compare k1 k2 of
     LT -> go acc ks1' ks2 recs1' recs2
     GT -> go acc ks1 ks2' recs1 recs2'
     EQ -> go (acc `snoc` combine [k1, val r1, val r2]) ks1' ks2' recs1' recs2'
