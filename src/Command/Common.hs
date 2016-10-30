@@ -3,7 +3,7 @@
 module Command.Common (module Command.Common, module Options.Applicative) where
 
 import           CustomPrelude
-import           Options.Applicative
+import           Options.Applicative hiding ((<>))
 import qualified  Language.Haskell.Interpreter as Hint
 import           Data.ByteString.Internal (c2w, w2c)
 import           Data.Text                (replace)
