@@ -139,14 +139,10 @@ sinkMultiFile :: (IOData a, MonadIO m) => Sink (FilePath, a) m ()
 sinkMultiFile = mapM_C $ \(file, line) ->  liftIO $
   withBinaryFile file AppendMode (`hPutStrLn` line)
 
-splitSink :: (MonadIO m) => Opts -> FilePath -> Sink ByteString m ()
-splitSink opts inFile = if optsHeader opts then await >>= sink else sink Nothing
+splitSink :: (MonadIO m) => Opts -> (ByteString -> FilePath) -> Sink ByteString m ()
+splitSink opts toFile = if optsHeader opts then await >>= sink else sink Nothing
   where
   sink (mheader :: Maybe ByteString) = foldMC (go mheader) (mempty :: Set FilePath) >> return ()
-  fk = execKey opts
-  (base, ext) = splitExtension inFile
-  toFile line = base +? BC.unpack (fk line) +? ext
-  x +? y = if null x then y else if null y then x else x ++ "." ++ y
   go mheader files line = liftIO $ uncurry (withBinaryFile file) $ if
     | file `member` files -> (AppendMode , \h -> hPutStrLn h line >> return files)
     | otherwise -> (WriteMode,

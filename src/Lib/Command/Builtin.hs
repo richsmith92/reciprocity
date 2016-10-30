@@ -3,15 +3,14 @@ module Lib.Command.Builtin where
 import CustomPrelude
 import Lib.Base
 import Lib.Command.Base
--- import Data.NonNull
+
 import qualified Language.Haskell.Interpreter as Hint
 import           System.Directory             (getHomeDirectory)
-
 import Data.Conduit.Merge
-import Data.Conduit.Zlib  (gzip)
-import Data.List.Extra    (groupSort)
 import Data.Text          (replace)
-import System.IO          (IOMode (..), withBinaryFile)
+-- import Data.Conduit.Zlib  (gzip)
+-- import Data.List.Extra    (groupSort)
+-- import System.IO          (IOMode (..), withBinaryFile)
 
 -- * Cat
 
@@ -91,47 +90,70 @@ instance IsCommand CmdMerge where
 
 -- * Split
 
-data CmdSplit = CmdSplit
-  deriving (Show)
+data CmdSplit = CmdSplit {
+  splitPartition :: Bool,
+  splitBuckets  :: Natural,
+  splitTemplate :: Text
+  } deriving (Show)
 instance IsCommand CmdSplit where
-  runCommand opts (CmdSplit) = sequence_ $
-    zipWith (\file source -> runConduitRes $ source .| linesC .| splitSink opts file)
-      (inputFiles opts) (inputSources opts)
 
   commandInfo = CmdInfo {
     cmdDesc = "Split into multiple files: put records having key KEY into file INPUT.KEY",
-    cmdParser = pure CmdSplit
+    cmdParser = do
+      splitPartition <- switch (long "partition" ++
+        help "Emulate map-reduce partition: split into buckets determined by hash of the key")
+      splitBuckets <- natOpt
+        (long "buckets" ++ help "Number of buckets" ++ value 1)
+      splitTemplate <- textOpt id (value ("{s}" ++ ".{filename}") ++
+        metavar "OUT_TEMPLATE" ++ help "Output filepath template (appended to input filename)")
+      return CmdSplit{..}
     }
 
--- * Partition
+  runCommand opts (CmdSplit{..}) = sequence_ $
+    zipWith (\file source -> runConduitRes $ source .| linesC .| splitSink opts (toFile file))
+    (inputFiles opts) (inputSources opts)
+    where
+    fk = execKey opts
+    toFile inFile = \rec -> unpack $ replace (optsReplaceStr opts) (value rec) template
+      where
+      template = replace "{filename}" (pack $ takeFileName inFile) splitTemplate
+      value = if
+        | splitPartition ->  tshow . bucket (fromIntegral splitBuckets) . fk
+        | otherwise ->  decodeUtf8 . fk
+    -- let (base, ext) = splitExtension inFile in base +? BC.unpack (fk rec) +? ext
+    -- x +? y = if null x then y else if null y then x else x ++ "." ++ y
 
-data CmdPartition = CmdPartition {
-  partitionBuckets  :: Natural,
-  partitionTemplate :: Text
-  } deriving Show
-instance IsCommand CmdPartition where
-  runCommand opts CmdPartition{..} = do
-    recs <- runConduitRes $ catInputSources opts .| sinkList
-    let buckets = byBucket (execKey opts) partitionBuckets recs
-    mapM_ (appendBucket opts partitionTemplate) buckets
-  commandInfo = CmdInfo {
-    cmdDesc = "Partition for MapReduce: split headerless input into N buckets determined by hash of the key",
-    cmdParser = partitionParser
-    }
+bucket :: Int -> ByteString -> Int
+bucket n s = 1 + hash s `mod` n
 
-partitionParser :: Parser CmdPartition
-partitionParser = do
-  partitionBuckets <- natOpt
-    (short 'B' ++ long "buckets" ++ help "Number of buckets" ++ value 1)
-  partitionTemplate <- argument (pack <$> str)
-    (metavar "OUT_TEMPLATE" ++ help "Output filepath template")
-  return CmdPartition{..}
-
-appendBucket :: Opts -> Text -> (Int, [ByteString]) -> IO ()
-appendBucket Opts{..} template (bucket, rows) = withBinaryFile file AppendMode $
-  \h -> runResourceT $ yieldMany rows $= gzip $$ sinkHandle h
-  where
-  file = unpack $ replace optsReplaceStr (tshow bucket) template ++ ".gz"
-
-byBucket :: (ByteString -> ByteString) -> Natural -> [ByteString] -> [(Int, [ByteString])]
-byBucket fk n recs = groupSort [(1 + hash (fk r) `mod` fromIntegral n, r) | r <- recs]
+--
+-- data CmdPartition = CmdPartition {
+--   partitionBuckets  :: Natural,
+--   partitionTemplate :: Text
+--   } deriving Show
+-- instance IsCommand CmdPartition where
+--   runCommand opts CmdPartition{..} = do
+--     recs <- runConduitRes $ catInputSources opts .| sinkList
+--     let buckets = byBucket (execKey opts) partitionBuckets recs
+--     mapM_ (appendBucket opts partitionTemplate) buckets
+--   commandInfo = CmdInfo {
+--     cmdDesc = "Partition for MapReduce: split headerless input into N buckets determined by hash of the key",
+--     cmdParser = partitionParser
+--     }
+--
+-- partitionParser :: Parser CmdPartition
+-- partitionParser = do
+--   partitionBuckets <- natOpt
+--     (short 'B' ++ long "buckets" ++ help "Number of buckets" ++ value 1)
+--   partitionTemplate <- argument (pack <$> str)
+--     (metavar "OUT_TEMPLATE" ++ help "Output filepath template")
+--   return CmdPartition{..}
+--
+-- appendBucket :: Opts -> Text -> (Int, [ByteString]) -> IO ()
+-- appendBucket Opts{..} template (bucket, rows) = withBinaryFile file AppendMode $
+--   \h -> runResourceT $ yieldMany rows $= gzip $$ sinkHandle h
+--   where
+--   file = unpack $ replace optsReplaceStr (tshow bucket) template ++ ".gz"
+--
+-- byBucket :: (ByteString -> ByteString) -> Natural -> [ByteString] -> [(Int, [ByteString])]
+-- byBucket fk n recs = groupSort [(1 + hash (fk r) `mod` fromIntegral n, r) | r <- recs]
