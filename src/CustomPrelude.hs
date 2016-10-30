@@ -12,7 +12,6 @@ import Control.Lens          as R hiding (Index, argument, cons, enum, index, sn
                                    (<&>), (<.>), (<|))
 
 import qualified Control.Category         as Cat
-import           Data.ByteString          (appendFile, elemIndex)
 import           Data.ByteString.Internal as R (c2w, w2c)
 
 import Data.Data     as R (Data)
@@ -42,7 +41,7 @@ readTsv = splitSeq "\t"
 readTsvLines :: (Textual s, Eq (Element s)) => s -> [[s]]
 readTsvLines = map readTsv . lines
 
-showTsvLines :: (IsString s, IsSequence s, Eq (Element s)) => [[s]] -> s
+showTsvLines :: (IsString s, IsSequence s) => [[s]] -> s
 showTsvLines = concatMap showTsvLn
 --
 -- terr :: Text -> IO ()
@@ -51,7 +50,7 @@ showTsvLines = concatMap showTsvLn
 -- terrLn :: Text -> IO ()
 -- terrLn = errLn . unpack
 
--- | Same as foldl', but with more convenient type
+-- | Wrapper for 'ofoldl\'' with more convenient type
 foldEndo' :: (MonoFoldable t) => (Element t -> b -> b) -> t -> b -> b
 foldEndo' f = flip $ ofoldl' (flip f)
 
@@ -115,8 +114,3 @@ fromRight (Right x) = x
 --
 -- parallelMap :: (a -> b) -> [a] -> [b]
 -- parallelMap = parMap rpar
-
-
-lines' :: ByteString -> [ByteString]
-lines' s = if null s then [] else
-  maybe [s] (\n -> let (x, y) = splitAt (n + 1) s in x : lines' y) $ elemIndex (c2w '\n') s
