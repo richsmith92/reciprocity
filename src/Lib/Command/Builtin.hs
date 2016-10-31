@@ -82,7 +82,9 @@ instance IsCommand CmdMerge where
     cmdDesc = "Merge ordered inputs into ordered output",
     cmdParser = pure CmdMerge
     }
-  runCommand opts@Opts{..} _ = runConduitRes $ withInputSourcesH opts merge .| unlinesAsciiC .| stdoutC
+  runCommand opts@Opts{..} _ = runResourceT $
+    withInputSourcesH opts $ \header sources -> runConduit $
+      (yieldMany header >> merge (map (.| linesC) sources)) .| unlinesAsciiC .| stdoutC
     where
     merge = case optsKey of
       [] -> mergeSources

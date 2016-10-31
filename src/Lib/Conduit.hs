@@ -35,26 +35,21 @@ inputFiles Opts{..} = case optsInputs of
   []     -> [""]
   inputs -> replaceElem "-" "" inputs
 
-withInputSourcesH :: MonadResource m
-  => Opts -> ([Source m ByteString] -> Source m ByteString) -> Source m ByteString
+withInputSourcesH :: MonadResource m => Opts -> (Maybe ByteString -> [Source m ByteString] -> m b) -> m b
 withInputSourcesH opts@Opts{..} combine = if
-  | optsHeader, (source1:sources@(_:_)) <- lineSources -> do
-    (resumable, header) <- lift $ source1 $$+ headC
-    yieldMany header
-    (tail1, finalize) <- lift $ unwrapResumable resumable
-    combine $ tail1 : map (.| tailC) sources
-    lift finalize
-  | otherwise -> combine lineSources
+  | optsHeader, (_:_) <- sources -> do
+    (unzip -> (sources', finalize), header:_) <- unzip <$> mapM (($$+ lineAsciiC foldC) >=> _1 unwrapResumable) sources
+    x <- combine (if null header then Nothing else Just header) sources'
+    sequence_ finalize
+    return x
+  | otherwise -> combine Nothing sources
   where
-  lineSources = map (.| linesC) $ inputSources opts
+  sources = inputSources opts
 
 catInputSources :: MonadResource m => Opts -> Source m ByteString
 catInputSources opts@Opts{..} = if
   | optsHeader, (source1:sources@(_:_)) <- inputSources opts -> source1 >> mapM_ (.| tailC) sources
   | otherwise -> sequence_ $ inputSources opts
-
-sourceDropHeader :: (MonadResource m) => FilePath -> Source m ByteString
-sourceDropHeader file = inputSource file .| tailC
 
 -- | Join two ordered lists; return joined output and leftovers
 joinLists :: forall a k b. (Ord k) => (a -> k) -> (a -> k) ->  ([k] -> b) -> [a] -> [a] -> (Seq b, ([a], [a]))
