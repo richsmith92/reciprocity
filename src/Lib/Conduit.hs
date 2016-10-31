@@ -35,21 +35,17 @@ inputFiles Opts{..} = case optsInputs of
   []     -> [""]
   inputs -> replaceElem "-" "" inputs
 
-withInputSourcesH :: MonadResource m => Opts -> (Maybe ByteString -> [Source m ByteString] -> m b) -> m b
+-- withInputSourcesH :: MonadResource m => Opts -> (Maybe ByteString -> [Source m ByteString] -> m b) -> m b
 withInputSourcesH opts@Opts{..} combine = if
   | optsHeader, (_:_) <- sources -> do
-    (unzip -> (sources', finalize), header:_) <- unzip <$> mapM (($$+ lineAsciiC foldC) >=> _1 unwrapResumable) sources
+    (unzip -> (sources', finalize), header:_) <- lift $
+      unzip <$> mapM (($$+ lineAsciiC foldC) >=> _1 unwrapResumable) sources
     x <- combine (if null header then Nothing else Just header) sources'
-    sequence_ finalize
+    lift $ sequence_ finalize
     return x
   | otherwise -> combine Nothing sources
   where
   sources = inputSources opts
-
-catInputSources :: MonadResource m => Opts -> Source m ByteString
-catInputSources opts@Opts{..} = if
-  | optsHeader, (source1:sources@(_:_)) <- inputSources opts -> source1 >> mapM_ (.| tailC) sources
-  | otherwise -> sequence_ $ inputSources opts
 
 -- | Join two ordered lists; return joined output and leftovers
 joinLists :: forall a k b. (Ord k) => (a -> k) -> (a -> k) ->  ([k] -> b) -> [a] -> [a] -> (Seq b, ([a], [a]))
@@ -104,6 +100,28 @@ joinSources key val combine [ConduitM !left0, ConduitM !right0] = ConduitM $ \re
 --      (src2, mrec2) <- lift $ src1 $$++ await
 --      return $ (,src2) <$> mrec2
 
+-- | Merge multiple sorted sources into one sorted producer.
+
+-- mergeSources :: (Ord a, Foldable f, Monad m) => f (Source m a) -> Producer m a
+-- mergeSources = mergeSourcesOn id
+
+-- | Merge multiple sorted sources into one sorted producer using specified sorting key.
+mergeSourcesOn :: (Ord b, Monad m) => (a -> b) -> [Source m a] -> Producer m a
+mergeSourcesOn key = mergeResumable . fmap newResumableSource . toList
+  where
+    mergeResumable sources = do
+        prefetchedSources <- lift $ traverse ($$++ await) sources
+        go [(a, s) | (s, Just a) <- prefetchedSources]
+    go [] = pure ()
+    go sources = do
+        let (a, src1) : sources1 = sortOn (key . fst) sources
+        yield a
+        (src2, mb) <- lift $ src1 $$++ await
+        let sources2 = case mb of
+                Nothing -> sources1
+                Just b  -> (b, src2) : sources1
+        go sources2
+
 -- * Transformers
 
 linesC :: Monad m => Conduit ByteString m ByteString
@@ -118,12 +136,11 @@ unlinesCE = mapC (BC.unlines . toList)
 lineChunksC :: Monad m => Conduit ByteString m ByteString
 lineChunksC = await >>= maybe (return ()) go
   where
-  go acc = await >>= maybe (yield acc) (go' . first (acc ++) . breakAfterEOL)
+  go acc = if
+    | Just (_, 10) <- unsnoc acc -> yield acc >> lineChunksC
+    | otherwise -> await >>= maybe (yield acc) (go' . breakAfterEOL)
     where
-    go' (x, y) = if null y then go x else yield x >> go y
-
-tailC :: Monad m => Conduit a m a
-tailC = await >>= maybe (return ()) (const $ awaitForever yield)
+    go' (this, next) = let acc' = acc ++ this in if null next then go acc' else yield acc' >> go next
 
 breakAfterEOL :: ByteString -> (ByteString, ByteString)
 breakAfterEOL = second uncons . break (== 10) >>> \(x, m) -> maybe (x, "") (first (snoc x)) m

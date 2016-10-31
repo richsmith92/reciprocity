@@ -5,6 +5,7 @@ import Lib.Base
 import Lib.Conduit
 
 import Options.Applicative hiding ((<>))
+import           System.Directory             (getHomeDirectory)
 
 data CmdInfo c = CmdInfo {
   cmdDesc   :: Text,
@@ -43,3 +44,10 @@ valueOpt = many (natRgOpt (long "val" ++ help "Value subrecord"))
 
 funOpt :: Mod OptionFields Text -> Parser Text
 funOpt mods = textOpt id (mods ++ metavar "FUN" ++ value "")
+
+-- * directory stuff
+
+getRootDir, getUserPrelude, getCacheDir :: IO FilePath
+getRootDir = (</> ".tsvtool") <$> getHomeDirectory
+getUserPrelude = (</> "UserPrelude.hs") <$> getRootDir
+getCacheDir = (</> "cache") <$> getRootDir

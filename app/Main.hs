@@ -28,7 +28,7 @@ commandParser = subparser (mconcat
   [ sub "split" (commandInfo :: CmdInfo CmdSplit)
   , sub "merge"  (commandInfo :: CmdInfo CmdMerge)
   , sub "join" (commandInfo :: CmdInfo CmdJoin)
-  , sub "cat" (commandInfo :: CmdInfo CmdCat)
+  , sub "run" (commandInfo :: CmdInfo CmdRun)
   ])
   where
   sub name (CmdInfo desc parser) = command name $ info (helper <*> (Command <$> parser)) (progDesc $ unpack desc)

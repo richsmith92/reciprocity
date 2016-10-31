@@ -3,51 +3,50 @@ module Lib.Command.Builtin where
 import CustomPrelude
 import Lib.Base
 import Lib.Command.Base
+-- import Lib.Hint
+import Lib.Compile
 
-import qualified Language.Haskell.Interpreter as Hint
-import           System.Directory             (getHomeDirectory)
-import Data.Conduit.Merge
+-- import           System.Directory             (getHomeDirectory)
 import Data.Text          (replace)
 -- import Data.Conduit.Zlib  (gzip)
 -- import Data.List.Extra    (groupSort)
 -- import System.IO          (IOMode (..), withBinaryFile)
+import System.Process
 
--- * Cat
+-- * Run
 
-data CmdCat = CmdCat {
-  catExpr :: Text
+data CmdRun = CmdRun {
+  runExpr :: Text,
+  runGhcOpts :: Text,
+  runExec :: Bool
+  -- runCompiled :: Bool,
+  -- runSimple :: Bool
   } deriving (Show)
-instance IsCommand CmdCat where
-  runCommand opts@Opts{..} cmd@CmdCat{..} = runConduitRes $
-    catInputSources opts .| linesC .| decodeUtf8C .| exprC opts cmd .| encodeUtf8C .| unlinesAsciiC .| stdoutC
+instance IsCommand CmdRun where
+
   commandInfo = CmdInfo {
-    cmdDesc = "Concatenate inputs and run given expression on them",
+    cmdDesc = "Run pipe given in --expr",
     cmdParser = do
-      catExpr <- funOpt (short 'e' ++ long "expr" ++ help "Expression")
-      return CmdCat{..}
+      runExpr <- funOpt (short 'e' ++ long "expr" ++ help "Expression")
+      runGhcOpts <- textOpt id (long "ghc-options" ++ help "Extra GHC options" ++ value "")
+      runExec <- not <$> switch (short 'n' ++ help "Build only, don't execute")
+      -- runSimple <- switch (long "simple" ++ help "Simple mode for interpreted expression")
+      -- runCompiled <- switch (short 'c' ++ help "Generate source code for program, compile it and run")
+      return CmdRun{..}
     }
 
-exprC :: (MonadIO m, Typeable m) => Opts -> CmdCat -> Conduit Text m Text
-exprC Opts{..} CmdCat{..} = do
-  when optsHeader $ takeC 1
-  c <- if
-    | null catExpr -> return $ awaitForever yield
-    | otherwise -> withInterpreter $ Hint.interpret (unpack catExpr) (awaitForever yield)
-  c
-
-withInterpreter :: forall f b. MonadIO f => Hint.InterpreterT IO b -> f b
-withInterpreter m = either (error . toMsg) id <.> liftIO $ Hint.runInterpreter $ do
-  homeDir <- liftIO getHomeDirectory
-  Hint.set [Hint.languageExtensions Hint.:= [Hint.OverloadedStrings]]
-  Hint.loadModules [homeDir </> ".tsvtool/UserPrelude.hs"]
-  Hint.setImportsQ [
-    ("UserPrelude", Nothing),
-    ("Prelude", Just "P")]
-  m
-  where
-  toMsg = \case
-    Hint.WontCompile errs -> unlines $ cons "***Interpreter***" $ map Hint.errMsg errs
-    e -> show e
+  runCommand opts@Opts{..} CmdRun{..} = do
+    -- | runCompiled -> do
+      exec <- compileExpr (words runGhcOpts) runExpr
+      args <- getArgs
+      when runExec $ do
+        _ <- createProcess $ proc exec (map unpack args)
+        return ()
+    -- | runSimple -> runConduitRes $
+    --   withInputSourcesH opts (\header sources ->
+    --     (yieldMany header >> sequence_ sources .| linesC .| decodeUtf8C .| exprC opts runExpr .| encodeUtf8C))
+    --   .| unlinesAsciiC .| stdoutC
+    -- | otherwise -> runConduitRes (exprC opts runExpr)
 
 -- * Join
 
@@ -82,12 +81,11 @@ instance IsCommand CmdMerge where
     cmdDesc = "Merge ordered inputs into ordered output",
     cmdParser = pure CmdMerge
     }
-  runCommand opts@Opts{..} _ = runResourceT $
-    withInputSourcesH opts $ \header sources -> runConduit $
-      (yieldMany header >> merge (map (.| linesC) sources)) .| unlinesAsciiC .| stdoutC
+  runCommand opts@Opts{..} _ = runConduitRes $
+    withInputSourcesH opts (\header sources -> (yieldMany header >> merge (map (.| linesC) sources))) .| unlinesAsciiC .| stdoutC
     where
     merge = case optsKey of
-      [] -> mergeSources
+      [] -> mergeSourcesOn id
       _  -> mergeSourcesOn $ execKey opts
 
 -- * Split
@@ -127,6 +125,8 @@ instance IsCommand CmdSplit where
 
 bucket :: Int -> ByteString -> Int
 bucket n s = 1 + hash s `mod` n
+
+-- * Hint
 
 --
 -- data CmdPartition = CmdPartition {
