@@ -31,7 +31,6 @@ library
     Lib.Compile
     Lib.Command.Base
     Lib.Command.Builtin
-    Lib.Hint
 
 executable tsvtool
   hs-source-dirs:      app

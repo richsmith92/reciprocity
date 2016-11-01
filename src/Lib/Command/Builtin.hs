@@ -4,49 +4,43 @@ import CustomPrelude
 import Lib.Base
 import Lib.Command.Base
 -- import Lib.Hint
-import Lib.Compile
+-- import Lib.Compile
 
 -- import           System.Directory             (getHomeDirectory)
 import Data.Text          (replace)
 -- import Data.Conduit.Zlib  (gzip)
 -- import Data.List.Extra    (groupSort)
 -- import System.IO          (IOMode (..), withBinaryFile)
-import System.Process
+-- import System.Process
 
--- * Run
+-- * Cat
 
-data CmdRun = CmdRun {
-  runExpr :: Text,
-  runGhcOpts :: Text,
-  runExec :: Bool
-  -- runCompiled :: Bool,
-  -- runSimple :: Bool
-  } deriving (Show)
-instance IsCommand CmdRun where
+data CmdCat = CmdCat deriving (Show)
+instance IsCommand CmdCat where
 
   commandInfo = CmdInfo {
-    cmdDesc = "Run pipe given in --expr",
-    cmdParser = do
-      runExpr <- funOpt (short 'e' ++ long "expr" ++ help "Expression")
-      runGhcOpts <- textOpt id (long "ghc-options" ++ help "Extra GHC options" ++ value "")
-      runExec <- not <$> switch (short 'n' ++ help "Build only, don't execute")
-      -- runSimple <- switch (long "simple" ++ help "Simple mode for interpreted expression")
-      -- runCompiled <- switch (short 'c' ++ help "Generate source code for program, compile it and run")
-      return CmdRun{..}
-    }
+    cmdDesc = "Concatenate inputs",
+    cmdParser = pure CmdCat
+  }
 
-  runCommand opts@Opts{..} CmdRun{..} = do
-    -- | runCompiled -> do
-      exec <- compileExpr (words runGhcOpts) runExpr
-      args <- getArgs
-      when runExec $ do
-        _ <- createProcess $ proc exec (map unpack args)
-        return ()
-    -- | runSimple -> runConduitRes $
-    --   withInputSourcesH opts (\header sources ->
-    --     (yieldMany header >> sequence_ sources .| linesC .| decodeUtf8C .| exprC opts runExpr .| encodeUtf8C))
-    --   .| unlinesAsciiC .| stdoutC
-    -- | otherwise -> runConduitRes (exprC opts runExpr)
+  runCommand opts@Opts{..} _ = runConduitRes $ withInputSourcesH opts $
+    \header sources -> (yieldMany header >> sequence_ sources) .| stdoutC
+
+-- * Merge
+
+data CmdMerge = CmdMerge deriving (Show)
+
+instance IsCommand CmdMerge where
+  commandInfo = CmdInfo {
+    cmdDesc = "Merge ordered inputs into ordered output",
+    cmdParser = pure CmdMerge
+    }
+  runCommand opts@Opts{..} _ = runConduitRes $ withInputSourcesH opts $
+    \header sources -> (yieldMany header >> merge (map (.| linesC) sources) .| unlinesAsciiC) .| stdoutC
+    where
+    merge = case optsKey of
+      [] -> mergeSourcesOn id
+      _  -> mergeSourcesOn $ execKey opts
 
 -- * Join
 
@@ -71,22 +65,6 @@ instance IsCommand CmdJoin where
       joinValue <- valueOpt
       return (CmdJoin{..})
     }
-
--- * Merge
-
-data CmdMerge = CmdMerge deriving (Show)
-
-instance IsCommand CmdMerge where
-  commandInfo = CmdInfo {
-    cmdDesc = "Merge ordered inputs into ordered output",
-    cmdParser = pure CmdMerge
-    }
-  runCommand opts@Opts{..} _ = runConduitRes $
-    withInputSourcesH opts (\header sources -> (yieldMany header >> merge (map (.| linesC) sources))) .| unlinesAsciiC .| stdoutC
-    where
-    merge = case optsKey of
-      [] -> mergeSourcesOn id
-      _  -> mergeSourcesOn $ execKey opts
 
 -- * Split
 

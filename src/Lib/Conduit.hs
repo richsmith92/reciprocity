@@ -35,12 +35,13 @@ inputFiles Opts{..} = case optsInputs of
   []     -> [""]
   inputs -> replaceElem "-" "" inputs
 
--- withInputSourcesH :: MonadResource m => Opts -> (Maybe ByteString -> [Source m ByteString] -> m b) -> m b
+withInputSourcesH :: (MonadResource m, MonadTrans t, Monad (t m)) =>
+  Opts -> (Maybe ByteString -> [Source m ByteString] -> t m b) -> t m b
 withInputSourcesH opts@Opts{..} combine = if
   | optsHeader, (_:_) <- sources -> do
     (unzip -> (sources', finalize), header:_) <- lift $
       unzip <$> mapM (($$+ lineAsciiC foldC) >=> _1 unwrapResumable) sources
-    x <- combine (if null header then Nothing else Just header) sources'
+    x <- combine (if null header then Nothing else Just $ snoc header 10) sources'
     lift $ sequence_ finalize
     return x
   | otherwise -> combine Nothing sources
