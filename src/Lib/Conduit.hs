@@ -14,6 +14,7 @@ import           System.IO             (IOMode (..), withBinaryFile)
 
 import           Data.Conduit.Internal (ConduitM (..), Pipe (..))
 import qualified Data.Conduit.Internal as CI
+import           Codec.Archive.Zip
 
 -- * Producers
 
@@ -23,6 +24,9 @@ inputSource file = source .| lineChunksC
   source = if
     | file == "-" -> stdinC
     | ".gz" `isSuffixOf` file -> sourceFile file .| ungzip
+    | ".zip" `isSuffixOf` file -> join $ liftIO $ withArchive file $ do
+        [entry] <- entryNames
+        getSource entry
     | otherwise -> sourceFile file
 
 inputSources :: MonadResource m => Opts -> [Source m ByteString]
