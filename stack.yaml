@@ -37,9 +37,11 @@ resolver: lts-7.2
 # will not be run. This is useful for tweaking upstream packages.
 packages:
 - '.'
+- packages/zip-conduit
+
 # Dependency packages to be pulled from upstream that are not in the resolver
 # (e.g., acme-missiles-0.3)
-extra-deps: [zip-conduit-0.2.2.2]
+extra-deps: []
 
 
 # Override default flag values for local packages and extra-deps
@@ -48,7 +50,8 @@ flags: {}
 # Extra package databases containing global packages
 extra-package-dbs: []
 
-allow-newer: True
+# allow-newer: True
+
 # Control whether we use the GHC we find on the path
 # system-ghc: true
 #
