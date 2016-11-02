@@ -1,5 +1,6 @@
 module Codec.Archive.Zip.Util where
 
+import Prelude
 import           Control.Applicative ((<$>))
 import           Data.Bits ((.&.), shiftR, shiftL)
 import           Data.ByteString (ByteString)
