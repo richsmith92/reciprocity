@@ -88,8 +88,8 @@ mwhen b x = if b then x else mempty
 munless :: (Monoid a) => Bool -> a -> a
 munless b x = if b then mempty else x
 
-toMaybe :: Bool -> a -> Maybe a
-toMaybe b x = if b then Just x else Nothing
+orEmpty :: Alternative f => Bool -> a -> f a
+orEmpty b a = if b then pure a else empty
 
 nonempty :: (MonoFoldable t) => a -> (t -> a) -> t -> a
 nonempty def f xs = if null xs then def else f xs

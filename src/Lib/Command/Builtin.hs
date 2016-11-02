@@ -49,15 +49,6 @@ data CmdJoin = CmdJoin {
   } deriving (Show)
 
 instance IsCommand CmdJoin where
-  runCommand opts@Opts{..} CmdJoin{..} = do
-    let [s1, s2] = [s .| linesCE | s <- inputSources opts]
-    runConduitRes $ joinSources (execKey opts) (execSubRec opts joinValue) combine [s1, s2] .|
-      unlinesCE .| stdoutC
-    where
-    combine = case optsKey of
-      [] -> headEx
-      _  -> intercalate sep
-    sep = fromString (unpack optsSep)
 
   commandInfo = CmdInfo {
     cmdDesc = "Join ordered headerless inputs on common key",
@@ -65,6 +56,17 @@ instance IsCommand CmdJoin where
       joinValue <- valueOpt
       return (CmdJoin{..})
     }
+
+  runCommand opts@Opts{..} CmdJoin{..} = do
+    let [s1, s2] = inputSources opts
+    runConduitRes $
+      joinCE (execKey opts) (execSubRec opts joinValue) combine (map (.| linesCE) [s1, s2]) .|
+      unlinesCE .| stdoutC
+    where
+    combine = case optsKey of
+      [] -> headEx
+      _  -> intercalate sep
+    sep = fromString (unpack optsSep)
 
 -- * Split
 
@@ -87,10 +89,9 @@ instance IsCommand CmdSplit where
       return CmdSplit{..}
     }
 
-  runCommand opts (CmdSplit{..}) = sequence_ $
-    zipWith (\file source -> runConduitRes $ source .| linesC .| splitSink opts (toFile file))
-    (inputFiles opts) (inputSources opts)
+  runCommand opts (CmdSplit{..}) = sequence_ $ zipWith split (inputFiles opts) (inputSources opts)
     where
+    split file source = runConduitRes $ withHeader opts source $ \h -> linesCE .| splitCE (toFile file) h
     fk = execKey opts
     toFile inFile = \rec -> unpack $ replace (optsReplaceStr opts) (value rec) template
       where
@@ -101,39 +102,4 @@ instance IsCommand CmdSplit where
     -- let (base, ext) = splitExtension inFile in base +? BC.unpack (fk rec) +? ext
     -- x +? y = if null x then y else if null y then x else x ++ "." ++ y
 
-bucket :: Int -> ByteString -> Int
-bucket n s = 1 + hash s `mod` n
-
--- * Hint
-
---
--- data CmdPartition = CmdPartition {
---   partitionBuckets  :: Natural,
---   partitionTemplate :: Text
---   } deriving Show
--- instance IsCommand CmdPartition where
---   runCommand opts CmdPartition{..} = do
---     recs <- runConduitRes $ catInputSources opts .| sinkList
---     let buckets = byBucket (execKey opts) partitionBuckets recs
---     mapM_ (appendBucket opts partitionTemplate) buckets
---   commandInfo = CmdInfo {
---     cmdDesc = "Partition for MapReduce: split headerless input into N buckets determined by hash of the key",
---     cmdParser = partitionParser
---     }
---
--- partitionParser :: Parser CmdPartition
--- partitionParser = do
---   partitionBuckets <- natOpt
---     (short 'B' ++ long "buckets" ++ help "Number of buckets" ++ value 1)
---   partitionTemplate <- argument (pack <$> str)
---     (metavar "OUT_TEMPLATE" ++ help "Output filepath template")
---   return CmdPartition{..}
---
--- appendBucket :: Opts -> Text -> (Int, [ByteString]) -> IO ()
--- appendBucket Opts{..} template (bucket, rows) = withBinaryFile file AppendMode $
---   \h -> runResourceT $ yieldMany rows $= gzip $$ sinkHandle h
---   where
---   file = unpack $ replace optsReplaceStr (tshow bucket) template ++ ".gz"
---
--- byBucket :: (ByteString -> ByteString) -> Natural -> [ByteString] -> [(Int, [ByteString])]
--- byBucket fk n recs = groupSort [(1 + hash (fk r) `mod` fromIntegral n, r) | r <- recs]
+-- * Replace

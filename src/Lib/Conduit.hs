@@ -19,7 +19,7 @@ import           Codec.Archive.Zip
 -- * Producers
 
 inputSource :: (MonadResource m) => FilePath -> Source m ByteString
-inputSource file = source .| lineChunksC
+inputSource file = source
   where
   source = if
     | file == "-" -> stdinC
@@ -31,7 +31,7 @@ inputSource file = source .| lineChunksC
 
 inputSources :: MonadResource m => Opts -> [Source m ByteString]
 inputSources Opts{..} = case optsInputs of
-  []     -> [stdinC .| lineChunksC]
+  []     -> [stdinC]
   inputs -> map inputSource inputs
 
 inputFiles :: Opts -> [FilePath]
@@ -45,27 +45,29 @@ withInputSourcesH opts@Opts{..} combine = if
   | optsHeader, (_:_) <- sources -> do
     (unzip -> (sources', finalize), header:_) <- lift $
       unzip <$> mapM (($$+ lineAsciiC foldC) >=> _1 unwrapResumable) sources
-    x <- combine (if null header then Nothing else Just $ snoc header 10) sources'
+    x <- combine (maybeAddEOL header) sources'
     lift $ sequence_ finalize
     return x
   | otherwise -> combine Nothing sources
   where
   sources = inputSources opts
 
--- | Join two ordered lists; return joined output and leftovers
-joinLists :: forall a k b. (Ord k) => (a -> k) -> (a -> k) ->  ([k] -> b) -> [a] -> [a] -> (Seq b, ([a], [a]))
-joinLists key val combine xs ys = go (mempty :: Seq b) (map key xs) (map key ys) xs ys
-  where
-  go !acc _ _ [] leftover = (acc, ([], leftover))
-  go !acc _ _ leftover [] = (acc, (leftover, []))
-  go !acc ks1@(!k1:ks1') ks2@(!k2:ks2') recs1@(r1:recs1') recs2@(r2:recs2') = case compare k1 k2 of
-    LT -> go acc ks1' ks2 recs1' recs2
-    GT -> go acc ks1 ks2' recs1 recs2'
-    EQ -> go (acc `snoc` combine [k1, val r1, val r2]) ks1' ks2' recs1' recs2'
+maybeAddEOL :: ByteString -> Maybe ByteString
+maybeAddEOL = nonempty Nothing (Just . (`snoc` 10))
+
+-- withHeader :: (MonadIO m, MonadTrans t, Monad (t m)) =>
+  -- Opts -> Source m ByteString -> (Maybe ByteString -> t m b) -> t m b
+withHeader Opts{..} source f = if
+  | optsHeader -> do
+    ((source', finalize), header) <- lift $ (($$+ lineAsciiC foldC) >=> _1 unwrapResumable) source
+    x <- source' .| f (maybeAddEOL header)
+    lift $ finalize
+    return x
+  | otherwise -> source .| f Nothing
 
 -- | Join multiple ordered sources (currenly works only for two sources)
-joinSources :: (Ord k, Monad m) => (a -> k) -> (a -> k) -> ([k] -> b) -> [Source m [a]] -> Producer m (Seq b)
-joinSources key val combine [ConduitM !left0, ConduitM !right0] = ConduitM $ \rest -> let
+joinCE :: (Ord k, Monad m) => (a -> k) -> (a -> k) -> ([k] -> b) -> [Source m [a]] -> Producer m (Seq b)
+joinCE key val combine [ConduitM !left0, ConduitM !right0] = ConduitM $ \rest -> let
   go (HaveOutput src1 close1 chunk1) (HaveOutput src2 close2 chunk2) = let
     (out, (lo1, lo2)) = joinLists key val combine chunk1 chunk2
     src1' = if null lo1 then src1 else CI.yield lo1 >> src1
@@ -83,27 +85,6 @@ joinSources key val combine [ConduitM !left0, ConduitM !right0] = ConduitM $ \re
   go (PipeM mx) y@HaveOutput{} = PipeM (liftM (\x -> go x y) mx)
   go x@HaveOutput{} (PipeM my) = PipeM (liftM (go x) my)
   in go (left0 Done) (right0 Done)
-
--- -- works slower than `joinSources` above
--- joinSources :: (Ord k, Monad m) => (a -> k) -> (a -> v) -> [Source m a] -> Producer m (k, [v])
--- joinSources key val = mergeResumable . fmap newResumableSource
---   where
---   mergeResumable sources = do
---     prefetchedSources <- lift $ traverse ($$++ await) sources
---     go $ fromList [keyRecSrc (r, s) | (s, Just r) <- prefetchedSources]
---   go v = do
---     let i = V.minIndexBy (comparing fst) v
---     let (kmin, (_, src1)) = v V.! i
---     let (kmax, _) = V.maximumBy (comparing fst) v
---     if | kmin /= kmax -> f src1 >>= maybe (return ()) (go . (\x -> v V.// [(i, keyRecSrc x)]))
---        | otherwise -> do
---          let (recs, srcs) = unzip $ map snd $ toList v
---          yield (kmin, map val recs)
---          runMaybeT (mapM (MaybeT . f) srcs) >>= maybe (return ()) (go . fromList . map keyRecSrc)
---   keyRecSrc (rec, src) = (key rec, (rec, src))
---   f src1 = do
---      (src2, mrec2) <- lift $ src1 $$++ await
---      return $ (,src2) <$> mrec2
 
 -- | Merge multiple sorted sources into one sorted producer.
 
@@ -133,7 +114,7 @@ linesC :: Monad m => Conduit ByteString m ByteString
 linesC = CB.lines
 
 linesCE :: Monad m => Conduit ByteString m [ByteString]
-linesCE = mapC BC.lines
+linesCE = lineChunksC .| mapC BC.lines
 
 unlinesCE :: (Monad m, MonoFoldable mono, Element mono ~ ByteString) => Conduit mono m ByteString
 unlinesCE = mapC (BC.unlines . toList)
@@ -150,19 +131,65 @@ lineChunksC = await >>= maybe (return ()) go
 breakAfterEOL :: ByteString -> (ByteString, ByteString)
 breakAfterEOL = second uncons . break (== 10) >>> \(x, m) -> maybe (x, "") (first (snoc x)) m
 
+-- replaceConduit :: HashMap ByteString ByteString -> Conduit ByteString m ByteString
+-- dictReplaceCE ::
+dictReplaceCE :: (MapValue map ~ k, ContainerKey map ~ k, IsMap map, Functor f, Monad m) =>
+  map -> ASetter s t k k -> Conduit (f s) m (f t)
+dictReplaceCE dict subrec = mapC $ map $ over subrec $ \x -> fromMaybe x $ lookup x dict
+
+subrecFilterCE :: (IsSequence b, Monad m) => (a -> Bool) -> Getting a (Element b) a -> Conduit b m b
+subrecFilterCE p subrec = mapC $ filter $ p . view subrec
+
 -- * Consumers
 
 sinkMultiFile :: (IOData a, MonadIO m) => Sink (FilePath, a) m ()
 sinkMultiFile = mapM_C $ \(file, line) ->  liftIO $
   withBinaryFile file AppendMode (`hPutStrLn` line)
 
-splitSink :: (MonadIO m) => Opts -> (ByteString -> FilePath) -> Sink ByteString m ()
-splitSink opts toFile = if optsHeader opts then await >>= sink else sink Nothing
+splitCE :: (MonadIO m) => (ByteString -> FilePath) -> Maybe ByteString -> Sink [ByteString] m ()
+splitCE toFile mheader = foldMCE go (mempty :: Set FilePath) >> return ()
   where
-  sink (mheader :: Maybe ByteString) = foldMC (go mheader) (mempty :: Set FilePath) >> return ()
-  go mheader files line = liftIO $ uncurry (withBinaryFile file) $ if
-    | file `member` files -> (AppendMode , \h -> hPutStrLn h line >> return files)
+  go files rec = liftIO $ uncurry (withBinaryFile file) $ if
+    | file `member` files -> (AppendMode , \h -> hPutStrLn h rec >> return files)
     | otherwise -> (WriteMode,
-      \h -> traverse_ (hPutStrLn h) mheader >> hPutStrLn h line >> return (insertSet file files))
+      \h -> traverse_ (hPutStrLn h) mheader >> hPutStrLn h rec >> return (insertSet file files))
     where
-    file = toFile line
+    file = toFile rec
+
+
+-- -- works slower than `joinCE` above
+-- joinCE :: (Ord k, Monad m) => (a -> k) -> (a -> v) -> [Source m a] -> Producer m (k, [v])
+-- joinCE key val = mergeResumable . fmap newResumableSource
+--   where
+--   mergeResumable sources = do
+--     prefetchedSources <- lift $ traverse ($$++ await) sources
+--     go $ fromList [keyRecSrc (r, s) | (s, Just r) <- prefetchedSources]
+--   go v = do
+--     let i = V.minIndexBy (comparing fst) v
+--     let (kmin, (_, src1)) = v V.! i
+--     let (kmax, _) = V.maximumBy (comparing fst) v
+--     if | kmin /= kmax -> f src1 >>= maybe (return ()) (go . (\x -> v V.// [(i, keyRecSrc x)]))
+--        | otherwise -> do
+--          let (recs, srcs) = unzip $ map snd $ toList v
+--          yield (kmin, map val recs)
+--          runMaybeT (mapM (MaybeT . f) srcs) >>= maybe (return ()) (go . fromList . map keyRecSrc)
+--   keyRecSrc (rec, src) = (key rec, (rec, src))
+--   f src1 = do
+--      (src2, mrec2) <- lift $ src1 $$++ await
+--      return $ (,src2) <$> mrec2
+
+-- * Pure helpers
+
+-- | Join two ordered lists; return joined output and leftovers
+joinLists :: forall a k b. (Ord k) => (a -> k) -> (a -> k) ->  ([k] -> b) -> [a] -> [a] -> (Seq b, ([a], [a]))
+joinLists key val combine xs ys = go (mempty :: Seq b) (map key xs) (map key ys) xs ys
+  where
+  go !acc _ _ [] leftover = (acc, ([], leftover))
+  go !acc _ _ leftover [] = (acc, (leftover, []))
+  go !acc ks1@(!k1:ks1') ks2@(!k2:ks2') recs1@(r1:recs1') recs2@(r2:recs2') = case compare k1 k2 of
+    LT -> go acc ks1' ks2 recs1' recs2
+    GT -> go acc ks1 ks2' recs1 recs2'
+    EQ -> go (acc `snoc` combine [k1, val r1, val r2]) ks1' ks2' recs1' recs2'
+
+bucket :: Int -> ByteString -> Int
+bucket n s = 1 + hash s `mod` n
