@@ -20,7 +20,7 @@ cabal-version:       >=1.10
 
 library
   hs-source-dirs:      src
-  ghc-options:         -O2 -Wall -fno-warn-name-shadowing
+  ghc-options:         -O2 -Wall -fno-warn-name-shadowing -fno-warn-partial-type-signatures
   build-depends:       base, classy-prelude-conduit, optparse-applicative, bytestring, text, conduit-extra, filepath, extra, directory, mono-traversable, lens, unordered-containers, double-conversion, these, conduit, vector, transformers, zip-conduit
   default-language:    Haskell2010
   default-extensions: OverloadedStrings, LambdaCase, MultiWayIf, ScopedTypeVariables, FlexibleContexts, FlexibleInstances, RecordWildCards, ViewPatterns, TupleSections, ParallelListComp, DeriveDataTypeable, DeriveGeneric, PartialTypeSignatures, ApplicativeDo, TypeFamilies, NoMonomorphismRestriction, NoImplicitPrelude, GADTs, StandaloneDeriving, RankNTypes, ConstraintKinds

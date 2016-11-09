@@ -5,6 +5,7 @@ import Lib.Base
 import Lib.Command.Base
 -- import Lib.Hint
 -- import Lib.Compile
+import Data.Char (isSpace)
 
 -- import           System.Directory             (getHomeDirectory)
 import Data.Text          (replace)
@@ -45,7 +46,9 @@ instance IsCommand CmdMerge where
 -- * Join
 
 data CmdJoin = CmdJoin {
-  joinValue :: SubRec
+  cmdJoinValue :: SubRec,
+  cmdJoinOuterLeft :: Bool,
+  cmdJoinOuterRight :: Bool
   } deriving (Show)
 
 instance IsCommand CmdJoin where
@@ -53,19 +56,26 @@ instance IsCommand CmdJoin where
   commandInfo = CmdInfo {
     cmdDesc = "Join ordered headerless inputs on common key",
     cmdParser = do
-      joinValue <- valueOpt
+      cmdJoinValue <- valueOpt
+      cmdJoinOuterLeft <- switch (short '1' ++ help "Outer join on first input")
+      cmdJoinOuterRight <- switch (short '2' ++ help "Outer join on second input")
       return (CmdJoin{..})
     }
 
   runCommand opts@Opts{..} CmdJoin{..} = do
     let [s1, s2] = inputSources opts
-    runConduitRes $
-      joinCE (execKey opts) (execSubRec opts joinValue) combine (map (.| linesCE) [s1, s2]) .|
-      unlinesCE .| stdoutC
+    runConduitRes $ joinCE joinOpts (map (.| linesCE) [s1, s2]) .| unlinesCE .| stdoutC
     where
-    combine = case optsKey of
-      [] -> headEx
-      _  -> intercalate sep
+    {-# INLINE joinOpts #-}
+    joinOpts = JoinOpts {
+      joinOuterLeft = cmdJoinOuterLeft,
+      joinOuterRight = cmdJoinOuterRight,
+      joinKey = execKey opts,
+      joinValue = execSubRec opts cmdJoinValue,
+      joinCombine = case optsKey of
+        [] -> headEx
+        _  -> \[k,v1,v2] -> k ++ sep ++ v1 ++ sep ++ v2
+      }
     sep = fromString (unpack optsSep)
 
 -- * Split
@@ -81,11 +91,10 @@ instance IsCommand CmdSplit where
     cmdDesc = "Split into multiple files: put records having key KEY into file INPUT.KEY",
     cmdParser = do
       splitPartition <- switch (long "partition" ++
-        help "Emulate map-reduce partition: split into buckets determined by hash of the key")
+        help "MapReduce partition mode: split into buckets determined by hash of the key")
       splitBuckets <- natOpt
         (long "buckets" ++ help "Number of buckets" ++ value 1)
-      splitTemplate <- textOpt id (value ("{s}" ++ ".{filename}") ++
-        metavar "OUT_TEMPLATE" ++ help "Output filepath template (appended to input filename)")
+      splitTemplate <- textOpt id (long "out" ++ value "{s}.{filename}" ++ help "Output filepath template (appended to input filename)")
       return CmdSplit{..}
     }
 
@@ -97,9 +106,15 @@ instance IsCommand CmdSplit where
       where
       template = replace "{filename}" (pack $ takeFileName inFile) splitTemplate
       value = if
-        | splitPartition ->  tshow . bucket (fromIntegral splitBuckets) . fk
-        | otherwise ->  decodeUtf8 . fk
+        | splitPartition -> tshow . bucket (fromIntegral splitBuckets) . fk
+        | otherwise -> omap (\c -> if isSpace c then '.' else c) .decodeUtf8 . fk
     -- let (base, ext) = splitExtension inFile in base +? BC.unpack (fk rec) +? ext
     -- x +? y = if null x then y else if null y then x else x ++ "." ++ y
 
 -- * Replace
+
+data CmdReplace = CmdReplace {
+  replaceDictFile :: FilePath,
+  replaceDictKey :: SubRec,
+  replaceDictValue :: SubRec
+  }

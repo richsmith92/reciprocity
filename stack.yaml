@@ -52,10 +52,10 @@ flags: {}
 
 # Extra package databases containing global packages
 extra-package-dbs: []
-
-nix:
-  # enable: true
-  packages: [zlib]
+#
+# nix:
+#   # enable: true
+#   packages: [zlib]
 
 # allow-newer: True
 

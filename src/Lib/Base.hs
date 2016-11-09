@@ -14,7 +14,7 @@ data Opts = Opts {
 
 type StringLike a = (IsString a, IOData a, IsSequence a, Eq (Element a), Typeable a)
 
-type SubRec = [Pair Natural]
+type SubRec = [Pair (Maybe Natural)]
 
 {-# INLINE execKey #-}
 execKey :: StringLike a => Opts -> a -> a
@@ -24,12 +24,17 @@ execKey opts = execSubRec opts (optsKey opts)
 execSubRec :: (StringLike a) => Opts -> SubRec -> a -> a
 execSubRec Opts{..} = \case
   [] -> id
-  [rg] -> intercalate sep . subrec (over both fromIntegral rg) . split
+  [rg] -> intercalate sep . subrec (over both (fmap fromIntegral) rg) . split
+  _ -> error "subrec: multiple ranges not implemented"
   where
   split = if
     | Just (c, s) <- uncons sep, null s -> splitElemEx c
     | otherwise -> splitSeq sep
-  subrec (i, j) = take (j - i + 1) . drop (i - 1)
+  subrec = \case
+    (Just i, Just j) -> take (j - i + 1) . drop i
+    (Just i, Nothing) -> drop i
+    (Nothing, Just i) -> take (i + 1)
+    (Nothing, Nothing) -> error "subrec: no fields"
   sep = fromString (unpack optsSep)
 
 splitElemEx :: (IsSequence seq, Eq (Element seq)) => Element seq -> seq -> [seq]

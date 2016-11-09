@@ -28,26 +28,28 @@ textOpt parse = option (parse . pack <$> str)
 natOpt :: OptParser Natural
 natOpt mods = option auto (mods ++ metavar "N")
 
-natRgOpt :: OptParser (Pair Natural)
-natRgOpt mods = textOpt (parse . map read . splitSeq ("," :: Text)) (mods ++ metavar "FROM[,TO]")
+subrecOpt :: OptParser (Pair (Maybe Natural))
+subrecOpt mods = textOpt (parse . splitSeq "-") (mods ++ metavar "FIELD|FROM-|-TO|FROM-TO")
   where
+  parse :: [String] -> Pair (Maybe Natural)
   parse = \case
-    [i] -> (i, i)
-    [i, j] -> if i <= j then (i, j) else error "natRgOpt: FROM > TO"
-    _ -> error "natRgOpt: unrecognized format"
+    [i] -> dupe $ field i
+    ["", i] -> (Nothing, field i)
+    [i, ""] -> (field i, Nothing)
+    [i, j] -> (field i, field j)
+    _ -> error "subrecOpt: unrecognized format"
+  field = Just . pred . read
 
 keyOpt :: Parser SubRec
-keyOpt = many (natRgOpt (long "key" ++ short 'k' ++ help "Key subrecord"))
+keyOpt = many (subrecOpt (long "key" ++ short 'k' ++ help "Key subrecord"))
 
 valueOpt :: Parser SubRec
-valueOpt = many (natRgOpt (long "val" ++ help "Value subrecord"))
+valueOpt = many (subrecOpt (long "val" ++ help "Value subrecord"))
 
 funOpt :: Mod OptionFields Text -> Parser Text
 funOpt mods = textOpt id (mods ++ metavar "FUN" ++ value "")
 
 -- * directory stuff
 
-getRootDir, getUserPrelude, getCacheDir :: IO FilePath
+getRootDir :: IO FilePath
 getRootDir = (</> ".tsvtool") <$> getHomeDirectory
-getUserPrelude = (</> "UserPrelude.hs") <$> getRootDir
-getCacheDir = (</> "cache") <$> getRootDir
