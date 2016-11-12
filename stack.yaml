@@ -37,14 +37,14 @@ resolver: lts-7.2
 # will not be run. This is useful for tweaking upstream packages.
 packages:
 - '.'
-- packages/zip-conduit
 # - packages/mono-traversable/mono-traversable
 # - packages/mono-traversable/classy-prelude-conduit
 # - packages/mono-traversable/classy-prelude
 
 # Dependency packages to be pulled from upstream that are not in the resolver
 # (e.g., acme-missiles-0.3)
-extra-deps: []
+extra-deps:
+- zip-conduit-0.2.2.2
 
 
 # Override default flag values for local packages and extra-deps
@@ -57,7 +57,7 @@ extra-package-dbs: []
 #   # enable: true
 #   packages: [zlib]
 
-# allow-newer: True
+allow-newer: True
 
 # Control whether we use the GHC we find on the path
 # system-ghc: true

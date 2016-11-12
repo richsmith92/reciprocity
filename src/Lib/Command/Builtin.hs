@@ -29,23 +29,26 @@ instance IsCommand CmdCat where
 
 -- * Merge
 
-data CmdMerge = CmdMerge deriving (Show)
+data CmdMerge = CmdMerge { mergeKey :: SubRec } deriving (Show)
 
 instance IsCommand CmdMerge where
   commandInfo = CmdInfo {
     cmdDesc = "Merge ordered inputs into ordered output",
-    cmdParser = pure CmdMerge
+    cmdParser = do
+      mergeKey <- keyOpt
+      pure CmdMerge{..}
     }
-  runCommand opts@Opts{..} _ = runConduitRes $ withInputSourcesH opts $
+  runCommand opts@Opts{..} CmdMerge{..} = runConduitRes $ withInputSourcesH opts $
     \header sources -> (yieldMany header >> merge (map (.| linesC) sources) .| unlinesAsciiC) .| stdoutC
     where
-    merge = case optsKey of
+    merge = case mergeKey of
       [] -> mergeSourcesOn id
-      _  -> mergeSourcesOn $ execKey opts
+      _  -> mergeSourcesOn $ execSubRec opts mergeKey
 
 -- * Join
 
 data CmdJoin = CmdJoin {
+  cmdJoinKey :: SubRec,
   cmdJoinValue :: SubRec,
   cmdJoinOuterLeft :: Bool,
   cmdJoinOuterRight :: Bool
@@ -56,6 +59,7 @@ instance IsCommand CmdJoin where
   commandInfo = CmdInfo {
     cmdDesc = "Join ordered headerless inputs on common key",
     cmdParser = do
+      cmdJoinKey <- keyOpt
       cmdJoinValue <- valueOpt
       cmdJoinOuterLeft <- switch (short '1' ++ help "Outer join on first input")
       cmdJoinOuterRight <- switch (short '2' ++ help "Outer join on second input")
@@ -70,9 +74,9 @@ instance IsCommand CmdJoin where
     joinOpts = JoinOpts {
       joinOuterLeft = cmdJoinOuterLeft,
       joinOuterRight = cmdJoinOuterRight,
-      joinKey = execKey opts,
+      joinKey = execSubRec opts cmdJoinKey,
       joinValue = execSubRec opts cmdJoinValue,
-      joinCombine = case optsKey of
+      joinCombine = case cmdJoinKey of
         [] -> headEx
         _  -> \[k,v1,v2] -> k ++ sep ++ v1 ++ sep ++ v2
       }
@@ -81,6 +85,7 @@ instance IsCommand CmdJoin where
 -- * Split
 
 data CmdSplit = CmdSplit {
+  splitKey :: SubRec,
   splitPartition :: Bool,
   splitBuckets  :: Natural,
   splitTemplate :: Text
@@ -90,6 +95,7 @@ instance IsCommand CmdSplit where
   commandInfo = CmdInfo {
     cmdDesc = "Split into multiple files: put records having key KEY into file INPUT.KEY",
     cmdParser = do
+      splitKey <- keyOpt
       splitPartition <- switch (long "partition" ++
         help "MapReduce partition mode: split into buckets determined by hash of the key")
       splitBuckets <- natOpt
@@ -101,8 +107,8 @@ instance IsCommand CmdSplit where
   runCommand opts (CmdSplit{..}) = sequence_ $ zipWith split (inputFiles opts) (inputSources opts)
     where
     split file source = runConduitRes $ withHeader opts source $ \h -> linesCE .| splitCE (toFile file) h
-    fk = execKey opts
-    toFile inFile = \rec -> unpack $ replace (optsReplaceStr opts) (value rec) template
+    fk = execSubRec opts splitKey
+    toFile inFile = \rec -> unpack $ replace "{s}" (value rec) template
       where
       template = replace "{filename}" (pack $ takeFileName inFile) splitTemplate
       value = if

@@ -1,24 +1,17 @@
 module Lib.Base where
 
 import CustomPrelude
--- import qualified Data.Sequences as S
 import qualified Data.ByteString as BS
 
 data Opts = Opts {
   optsSep        :: Text,
   optsHeader     :: Bool,
-  optsReplaceStr :: Text,
-  optsKey        :: SubRec,
   optsInputs     :: [FilePath]
   } deriving (Show)
 
 type StringLike a = (IsString a, IOData a, IsSequence a, Eq (Element a), Typeable a)
 
 type SubRec = [Pair (Maybe Natural)]
-
-{-# INLINE execKey #-}
-execKey :: StringLike a => Opts -> a -> a
-execKey opts = execSubRec opts (optsKey opts)
 
 {-# INLINE execSubRec #-}
 execSubRec :: (StringLike a) => Opts -> SubRec -> a -> a

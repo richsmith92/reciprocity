@@ -7,10 +7,7 @@ reducer=$3
 reduce_dir=$output/reduce
 ksort="sort --key=${key/-/,} --stable"
 
-if [ -z $NM ]; then NM=$(nproc); fi
-if [ -z $NR ]; then NR=$(nproc); fi
+rm -rf $reduce_dir/
+mkdir -p $reduce_dir
 
-(mkdir -p $reduce_dir; rm -rf $reduce_dir/* && echo "Cleaned $reduce_dir")
-
-time ls $output/map/ | \
-  parallel --nice=20 $ksort $output/map/{}/* \| $reducer \| sort -s \> $reduce_dir/{}
+ls $output/map/ | parallel --nice=20 $ksort $output/map/{}/* \| $reducer \> $reduce_dir/{}

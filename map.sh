@@ -1,27 +1,34 @@
 #!/bin/bash
 
 output="$1"
-key="$2"
+export key="$2"
 mapper=$3
 inputs=${@:4}
 
-map_dir=$output/map
+export map_dir=$output/map
 ksort="sort --key=${key/-/,} --stable"
 
-if [ -z $NM ]; then NM=$(nproc); fi
-if [ -z $NR ]; then NR=$(nproc); fi
+if [ -z $NM ]; then export NM=$(nproc); fi
+if [ -z $NR ]; then export NR=$(nproc); fi
 
-(rm -rf $map_dir && echo "Cleaned $map_dir")
+rm -rf $map_dir
 mkdir -p $map_dir
 seq $NR | parallel mkdir -p $map_dir/{}
 
-if [ -z $inputs ]; then
-  par() { parallel --pipe --nice=20 -j$NM $@ ;}
+
+function par() {
+  parallel --nice=20 -j$NM $@
+}
+function partition() {
+  tsvtool --key=$key split --partition --buckets=$NR --out="$map_dir/{s}/$1j$(printf %05d $2)"
+}
+export -f partition
+
+if [ -z "$inputs" ]; then
+  # put mapper output into {reducer id}/{job#}
+  par --pipe $mapper \| partition \'\' {#}
 else
-  par() { find $inputs -maxdepth 1 -type f | parallel --nice=20 -j$NM \< {} $@ ;}
+  # enumerate files; put mapper output into {reducer id}/{file#}.{job#}
+  find $inputs -maxdepth 1 -type f | awk '{printf("%05d\t%s\n",++i,$0)}' | par -C'\t' \< {2} $mapper \| partition {1}. {#}
 fi
-
-par $mapper \| tsvtool --key="$key" split --partition --buckets=$NR --out="$map_dir/{s}/{%}"
-# par $mapper \| $ksort \| tsvtool --key="$key" split --out="$map_dir/{%}/{s}"
-
 find $map_dir -empty -delete
