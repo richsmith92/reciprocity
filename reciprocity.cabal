@@ -1,0 +1,54 @@
+name:                reciprocity
+version:             0.1.0.0
+synopsis:            Record processing toolset (library and executable)
+description:         Please see README.md
+homepage:            https://github.com/w3rs/reciprocity#readme
+license:             MIT
+license-file:        LICENSE
+author:              Oleksii Karakulov
+maintainer:          ankarakulov@gmail.com
+category:            Text
+build-type:          Simple
+-- extra-source-files:
+cabal-version:       >=1.10
+
+-- library
+--   hs-source-dirs:      src
+--   exposed-modules:     Lib
+--   build-depends:       base >= 4.7 && < 5
+--   default-language:    Haskell2010
+
+library
+  hs-source-dirs:      src
+  ghc-options:         -O2 -Wall -fno-warn-name-shadowing -fno-warn-partial-type-signatures
+  build-depends:       base, classy-prelude-conduit, optparse-applicative, bytestring, text, conduit-extra, filepath, extra, directory, mono-traversable, lens, unordered-containers, double-conversion, these, conduit, vector, transformers, zip-conduit
+  default-language:    Haskell2010
+  default-extensions: OverloadedStrings, LambdaCase, MultiWayIf, ScopedTypeVariables, FlexibleContexts, FlexibleInstances, RecordWildCards, ViewPatterns, TupleSections, ParallelListComp, DeriveDataTypeable, DeriveGeneric, PartialTypeSignatures, ApplicativeDo, TypeFamilies, NoMonomorphismRestriction, NoImplicitPrelude, GADTs, StandaloneDeriving, RankNTypes, ConstraintKinds
+  exposed-modules:
+    CustomPrelude
+    Reciprocity.Base
+    Reciprocity.Conduit
+    Reciprocity.Command.Base
+    Reciprocity.Command.Builtin
+
+executable rp
+  hs-source-dirs:      app
+  main-is:             Main.hs
+  ghc-options:         -O2 -fno-warn-name-shadowing
+  build-depends:       reciprocity, base, classy-prelude-conduit, optparse-applicative, hint, bytestring, text, conduit-extra, filepath, directory, unordered-containers, double-conversion, these, conduit, vector, transformers
+  default-language:    Haskell2010
+  default-extensions: OverloadedStrings, LambdaCase, MultiWayIf, ScopedTypeVariables, FlexibleContexts, FlexibleInstances, RecordWildCards, ViewPatterns, TupleSections, ParallelListComp, DeriveDataTypeable, DeriveGeneric, PartialTypeSignatures, ApplicativeDo, TypeFamilies, NoMonomorphismRestriction, NoImplicitPrelude, GADTs, StandaloneDeriving, RankNTypes, ConstraintKinds
+  -- other-modules:
+
+-- test-suite reciprocity-test
+--   type:                exitcode-stdio-1.0
+--   hs-source-dirs:      test
+--   main-is:             Spec.hs
+--   build-depends:       base
+--                      , reciprocity
+--   ghc-options:         -threaded -rtsopts -with-rtsopts=-N
+--   default-language:    Haskell2010
+
+source-repository head
+  type:     git
+  location: https://github.com/w3rs/reciprocity
