@@ -1,9 +1,9 @@
 module Main where
 
 import CustomPrelude
-import Lib.Base
-import Lib.Command.Base
-import Lib.Command.Builtin
+import Reciprocity.Base
+import Reciprocity.Command.Base
+import Reciprocity.Command.Builtin
 
 main :: IO ()
 main = do
