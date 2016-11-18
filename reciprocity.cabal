@@ -9,7 +9,6 @@ author:              Oleksii Karakulov
 maintainer:          ankarakulov@gmail.com
 category:            Text
 build-type:          Simple
--- extra-source-files:
 cabal-version:       >=1.10
 
 -- library

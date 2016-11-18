@@ -9,26 +9,48 @@ data Opts = Opts {
   optsInputs     :: [FilePath]
   } deriving (Show)
 
-type StringLike a = (IsString a, IOData a, IsSequence a, Eq (Element a), Typeable a)
+data Env s = Env {
+  envOpts :: Opts,
+  envSplit :: s -> [s],
+  envIntercalate :: [s] -> s,
+  envSep :: s
+  }
 
-type SubRec = [Pair (Maybe Natural)]
+-- type StringLike a = (IsString a, IOData a, IsSequence a, Eq (Element a), Typeable a)
+type StringLike s = (s ~ ByteString)
 
-{-# INLINE execSubRec #-}
-execSubRec :: (StringLike a) => Opts -> SubRec -> a -> a
-execSubRec Opts{..} = \case
+type Subrec = [Pair (Maybe Natural)]
+
+getEnv :: Opts -> Env ByteString
+getEnv opts@Opts{..} = Env {
+  envOpts = opts,
+  envSplit = if
+    | Just (c, "") <- uncons sep -> splitElemEx c
+    | otherwise -> splitSeq sep,
+  envIntercalate = intercalate sep,
+  envSep = sep
+  }
+  where
+  sep = fromString (unpack optsSep)
+
+{-# INLINE getSubrec #-}
+getSubrec :: (StringLike s) => Env s -> Subrec -> s -> s
+getSubrec env sub = runIdentity . (subrec env) sub Identity
+
+{-# INLINE subrec #-}
+subrec :: (StringLike s) => Env s -> Subrec -> Lens' s s
+subrec Env{..} = \case
   [] -> id
-  [rg] -> intercalate sep . subrec (over both (fmap fromIntegral) rg) . split
+  [rg] -> \f -> f . subrec (over both (fmap fromIntegral) rg)
   _ -> error "subrec: multiple ranges not implemented"
   where
-  split = if
-    | Just (c, s) <- uncons sep, null s -> splitElemEx c
-    | otherwise -> splitSeq sep
-  subrec = \case
-    (Just i, Just j) -> take (j - i + 1) . drop i
-    (Just i, Nothing) -> drop i
-    (Nothing, Just i) -> take (i + 1)
-    (Nothing, Nothing) -> error "subrec: no fields"
-  sep = fromString (unpack optsSep)
+  subrec r = if
+    | (Just i, Just j) <- r -> envIntercalate . take (j - i + 1) . drop i . envSplit
+    | (Just i, Nothing) <- r -> envIntercalate . drop i . envSplit
+    | (Nothing, Just i) <- r -> envIntercalate . take (i + 1) . envSplit
+    | (Nothing, Nothing) <- r -> error "subrec: no fields"
+
+-- keyValue :: (StringLike s) => Env s -> Subrec -> Lens' s (s, s)
 
 splitElemEx :: (IsSequence seq, Eq (Element seq)) => Element seq -> seq -> [seq]
 splitElemEx x = splitWhen (== x)

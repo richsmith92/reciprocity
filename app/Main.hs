@@ -9,7 +9,7 @@ main :: IO ()
 main = do
   (Command cmd, opts) <- execParser parser
   -- print (opts, cmd)
-  runCommand opts cmd
+  runReaderT (runCommand cmd) (getEnv opts)
   where
   parser = info (helper <*> optsParser) $ progDesc ""
 
@@ -27,6 +27,7 @@ commandParser = subparser (mconcat
   , sub "merge"  (commandInfo :: CmdInfo CmdMerge)
   , sub "join" (commandInfo :: CmdInfo CmdJoin)
   , sub "cat" (commandInfo :: CmdInfo CmdCat)
+  , sub "replace" (commandInfo :: CmdInfo CmdReplace)
   ])
   where
   sub name (CmdInfo desc parser) = command name $ info (helper <*> (Command <$> parser)) (progDesc $ unpack desc)

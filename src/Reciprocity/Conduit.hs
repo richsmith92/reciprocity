@@ -18,7 +18,7 @@ import           Codec.Archive.Zip
 
 -- * Producers
 
-inputSource :: (MonadResource m) => FilePath -> Source m ByteString
+inputSource :: (MonadResource m, StringLike s) => FilePath -> Source m s
 inputSource file = source
   where
   source = if
@@ -29,19 +29,19 @@ inputSource file = source
         getSource entry
     | otherwise -> sourceFile file
 
-inputSources :: MonadResource m => Opts -> [Source m ByteString]
-inputSources Opts{..} = case optsInputs of
+inputSources :: (MonadResource m, s ~ ByteString) => Env s -> [Source m s]
+inputSources Env{..} = case optsInputs envOpts of
   []     -> [stdinC]
   inputs -> map inputSource inputs
 
-inputFiles :: Opts -> [FilePath]
-inputFiles Opts{..} = case optsInputs of
+inputFiles :: Env s -> [FilePath]
+inputFiles Env{..} = case optsInputs envOpts of
   []     -> [""]
   inputs -> replaceElem "-" "" inputs
 
-withInputSourcesH :: (MonadResource m, MonadTrans t, Monad (t m)) =>
-  Opts -> (Maybe ByteString -> [Source m ByteString] -> t m b) -> t m b
-withInputSourcesH opts@Opts{..} combine = if
+withInputSourcesH :: (MonadResource m, MonadTrans t, Monad (t m), StringLike s) =>
+  Env s -> (Maybe s -> [Source m s] -> t m b) -> t m b
+withInputSourcesH env combine = if
   | optsHeader, (_:_) <- sources -> do
     (unzip -> (sources', finalize), header:_) <- lift $
       unzip <$> mapM (($$+ lineAsciiC foldC) >=> _1 unwrapResumable) sources
@@ -50,15 +50,16 @@ withInputSourcesH opts@Opts{..} combine = if
     return x
   | otherwise -> combine Nothing sources
   where
-  sources = inputSources opts
+  sources = inputSources env
+  Opts{..} = envOpts env
 
 maybeAddEOL :: ByteString -> Maybe ByteString
 maybeAddEOL = nonempty Nothing (Just . (`snoc` 10))
 
--- withHeader :: (MonadIO m, MonadTrans t, Monad (t m)) =>
-  -- Opts -> Source m ByteString -> (Maybe ByteString -> t m b) -> t m b
-withHeader Opts{..} source f = if
-  | optsHeader -> do
+withHeader :: MonadIO m =>
+  Env t -> Source m ByteString -> (Maybe ByteString -> ConduitM ByteString c m r) -> ConduitM () c m r
+withHeader Env{..} source f = if
+  | optsHeader envOpts -> do
     ((source', finalize), header) <- lift $ (($$+ lineAsciiC foldC) >=> _1 unwrapResumable) source
     x <- source' .| f (maybeAddEOL header)
     lift $ finalize
@@ -140,9 +141,9 @@ breakAfterEOL = second uncons . break (== 10) >>> \(x, m) -> maybe (x, "") (firs
 
 -- replaceConduit :: HashMap ByteString ByteString -> Conduit ByteString m ByteString
 -- dictReplaceCE ::
-dictReplaceCE :: (MapValue map ~ k, ContainerKey map ~ k, IsMap map, Functor f, Monad m) =>
-  map -> ASetter s t k k -> Conduit (f s) m (f t)
-dictReplaceCE dict subrec = mapC $ map $ over subrec $ \x -> fromMaybe x $ lookup x dict
+-- dictReplaceCE :: (MapValue map ~ k, ContainerKey map ~ k, IsMap map, Functor f, Monad m) =>
+  -- map -> ASetter s t k k -> Conduit (f s) m (f t)
+dictReplaceCE dict subrec = mapC $ map $ subrec %~ \x -> fromMaybe x $ lookup x dict
 
 subrecFilterCE :: (IsSequence b, Monad m) => (a -> Bool) -> Getting a (Element b) a -> Conduit b m b
 subrecFilterCE p subrec = mapC $ filter $ p . view subrec
