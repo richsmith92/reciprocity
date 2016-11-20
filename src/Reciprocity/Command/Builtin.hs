@@ -79,6 +79,7 @@ instance IsCommand CmdJoin where
       joinOuterRight = cmdJoinOuterRight,
       joinKey = getSubrec env cmdJoinKey,
       joinValue = getSubrec env cmdJoinValue,
+      -- joinKeyValue = getKeyValue env cmdJoinKey cmdJoinValue,
       joinCombine = case cmdJoinKey of
         [] -> headEx
         _  -> \[k,v1,v2] -> k ++ envSep ++ v1 ++ envSep ++ v2
@@ -138,11 +139,12 @@ instance IsCommand CmdReplace where
       return CmdReplace{..}
     }
 
-  -- runCommand (CmdReplace{..}) = do
-  --   env <- ask
-  --   let sub = subrec env replaceSubrec
-  --   -- dict <- runConduitRes $ sourceFile replaceDictFile .| linesCE .| foldlCE
-  --     -- (\s -> insertMap (get)
-  --   let replaceC =  (.| linesCE .| dictReplaceCE dict sub .| unlinesCE)
-  --   runConduitRes $ withInputSourcesH env $
-  --     \header sources -> (yieldMany header >> mapM_ replaceC sources) .| stdoutC
+  runCommand (CmdReplace{..}) = do
+    env <- ask
+    let sub = subrec env replaceSubrec
+    dict <- runConduitRes $ sourceFile replaceDictFile .| linesCE .| foldlCE
+      (\m s -> uncurry insertMap (getKeyValue env replaceDictKey replaceDictValue s) m)
+      (mempty :: HashMap ByteString _)
+    let replaceC =  (.| linesCE .| dictReplaceCE dict sub .| unlinesCE)
+    runConduitRes $ withInputSourcesH env $
+      \header sources -> (yieldMany header >> mapM_ replaceC sources) .| stdoutC

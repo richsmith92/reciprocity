@@ -29,6 +29,9 @@ library
     Reciprocity.Conduit
     Reciprocity.Command.Base
     Reciprocity.Command.Builtin
+    Reciprocity.Internal
+  c-sources:           src/Reciprocity/Internal.c
+  cc-options:          -Wall -O2
 
 executable rp
   hs-source-dirs:      app
