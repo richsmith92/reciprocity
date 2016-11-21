@@ -1,16 +1,15 @@
-
-int c_subrec (unsigned char sep, char *s, long bs_len, long start, long end, long *mv) {
-
+// Given separator, string, start and end fields, calculate substring start and end positions and write them to array
+int c_subrec (unsigned char sep, char *s, long off, long len, long start_field, long end_field, long *out) {
       long i = 0, k = 0;
-      while (k < start && i < bs_len) {
+      s += off;
+      while (k < start_field && i < len) {
         if (s[i++] == sep) k++;
       }
       long i1 = i;
-      while (k <= end && i < bs_len) {
+      while (k <= end_field && i < len) {
         if (s[i++] == sep) k++;
       }
-      mv[0] = i1;
-      mv[1] = i == bs_len && k <= end ? i - i1 : i - i1 - 1;
+      out[0] = off + i1; // substring offset
+      out[1] = i == len && k <= end_field ? i - i1 : i - i1 - 1; //substring length
       return 0;
-
 }

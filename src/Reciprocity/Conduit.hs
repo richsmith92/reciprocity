@@ -202,19 +202,19 @@ joinLists JoinOpts{..} xs ys = go xs ys (mempty :: Seq _)
   go [] rest = (, ([], rest))
   go rest [] = (, (rest, []))
 
-  go (r1:recs1) (r2:recs2) = iter ({-# SCC key #-} joinKey r1) ({-# SCC key #-} joinKey r2) r1 r2 recs1 recs2
+  go (r1:recs1) (r2:recs2) = iter (joinKey r1) (joinKey r2) r1 r2 recs1 recs2
   go1 _ r rest [] = (, (r:rest, []))
-  go1 !k1 r1 recs1 (r2:recs2) = iter k1 ({-# SCC key #-} joinKey r2) r1 r2 recs1 recs2
+  go1 !k1 r1 recs1 (r2:recs2) = iter k1 (joinKey r2) r1 r2 recs1 recs2
   go2 _ r [] rest = (, ([], r:rest))
-  go2 !k2 r2 (r1:recs1) recs2 = iter ({-# SCC key #-} joinKey r1) k2 r1 r2 recs1 recs2
+  go2 !k2 r2 (r1:recs1) recs2 = iter (joinKey r1) k2 r1 r2 recs1 recs2
   {-# INLINE iter #-}
   iter k1 k2 r1 r2 recs1 recs2 = {-# SCC iter #-} case compare k1 k2 of
     LT -> {-# SCC lt #-} go2 k2 r2 recs1 recs2 .! appendL k1 v1
     GT -> {-# SCC gt #-} go1 k1 r1 recs1 recs2 .! appendR k2 v2
     EQ -> {-# SCC eq #-} go recs1 recs2 .! append k1 v1 v2
     where
-    v1 = {-# SCC v1 #-} joinValue r1
-    v2 = {-# SCC v2 #-} joinValue r2
+    v1 = joinValue r1
+    v2 = joinValue r2
 
   -- go (r1:recs1) (r2:recs2) = iter r1 r2 recs1 recs2
   -- -- go1 _ r rest [] = (, (r:rest, []))

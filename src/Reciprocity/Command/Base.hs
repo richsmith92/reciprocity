@@ -32,15 +32,16 @@ textOpt parse = option (parse . pack <$> str)
 natOpt :: OptParser Natural
 natOpt mods = option auto (mods ++ metavar "N")
 
-subrecOpt :: Mod OptionFields (Pair (Maybe Natural)) -> Parser Subrec
-subrecOpt mods = many $ textOpt (parse . splitSeq "-") (mods ++ metavar "FIELD|FROM-|-TO|FROM-TO")
+subrecOpt :: OptParser Subrec
+subrecOpt mods = textOpt (parse . splitSeq "-") (mods ++ metavar "SUBREC")
   where
-  parse :: [String] -> Pair (Maybe Natural)
+  parse :: [String] -> Subrec
   parse = \case
-    [i] -> dupe $ field i
-    ["", i] -> (Nothing, field i)
-    [i, ""] -> (field i, Nothing)
-    [i, j] -> (field i, field j)
+    [i] ->     [(field i,field i)]
+    ["",""] -> []
+    ["", i] -> [(Nothing, field i)]
+    [i, ""] -> [(field i, Nothing)]
+    [i, j] ->  [(field i, field j)]
     _ -> error "subrecOpt: unrecognized format"
   field = Just . pred . read
 

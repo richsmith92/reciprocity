@@ -3,8 +3,7 @@ module Reciprocity.Base where
 
 import CustomPrelude
 import qualified Data.ByteString as B
-import qualified Data.ByteString.Unsafe as B
-import Prelude ((!!))
+-- import qualified Data.ByteString.Unsafe as B
 import Reciprocity.Internal
 
 data Opts = Opts {
@@ -32,6 +31,9 @@ type StringLike s = (s ~ ByteString)
 
 type Subrec = [Pair (Maybe Natural)]
 
+singleField :: Natural -> Subrec
+singleField i = [dupe (Just i)]
+
 getEnv :: Opts -> Env ByteString
 getEnv opts@Opts{..} = Env {
   envOpts = opts,
@@ -46,23 +48,25 @@ getEnv opts@Opts{..} = Env {
 
 {-# INLINE getSubrec #-}
 getSubrec :: (StringLike s) => Env s -> Subrec -> s -> s
-getSubrec env sub = runIdentity . (subrec env) sub Identity
+getSubrec Env{..} sub = if
+  | [] <- sub -> id
+  | [r] <- sub, [sep] <- toList envSep -> getSub sep (bounds r)
+  | otherwise -> error "Multiple ranges and multibyte separators not implemented yet"
 
 {-# INLINE subrec #-}
 subrec :: (StringLike s) => Env s -> Subrec -> Lens' s s
-subrec env = \case
-  [] -> id
-  [r] -> \f -> f . subrec' env (bounds r)
-  _ -> error "subrec: multiple ranges not implemented"
+subrec Env{..} sub = if
+  | [] <- sub -> id
+  | [r] <- sub, [sep] <- toList envSep -> subLens sep (bounds r)
+  | otherwise -> error "Multiple ranges and multibyte separators not implemented yet"
+--
+-- {-# INLINE subrec' #-}
+-- subrec' Env{..} (start, end) = case toList envSep of
+--   [c] -> c_subrec c (start, end)
+--     -- | start == 0, end == 0 -> takeWhile (/= c)
+--   _ -> envIntercalate . take (end - start) . drop start . envSplit
 
-{-# INLINE subrec' #-}
-subrec' Env{..} (start, end) = case toList envSep of
-  [c] -> if
-    -- | start == 0, end == 0 -> takeWhile (/= c)
-    | otherwise -> {-# SCC c_subrec_ #-} c_subrec c (start, end)
-    -- | otherwise -> \s -> let v = byteStringToVector; is = B.elemIndices c s in slice (start, end) is (length is) s
-  _ -> envIntercalate . take (end - start) . drop start . envSplit
-
+bounds :: (Num c, Integral a, Bounded c) => (Maybe a, Maybe a) -> (c, c)
 bounds = (maybe 0 fromIntegral *** maybe maxBound fromIntegral)
 
 -- {-# INLINE (!.) #-}
