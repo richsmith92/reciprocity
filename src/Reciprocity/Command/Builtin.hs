@@ -90,6 +90,7 @@ instance IsCommand CmdJoin where
 data CmdSplit = CmdSplit {
   splitKey :: Subrec,
   splitPartition :: Bool,
+  splitMkdir :: Bool,
   splitBuckets  :: Natural,
   splitTemplate :: Text
   } deriving (Show)
@@ -101,6 +102,7 @@ instance IsCommand CmdSplit where
       splitKey <- keyOpt
       splitPartition <- switch (long "partition" ++
         help "MapReduce partition mode: split into buckets determined by hash of the key")
+      splitMkdir <- switch (long "mkdir" ++ help "Create directories for output files")
       splitBuckets <- natOpt
         (long "buckets" ++ help "Number of buckets" ++ value 1)
       splitTemplate <- textOpt id (long "out" ++ value "{s}.{filename}" ++ help "Output filepath template (appended to input filename)")
@@ -110,7 +112,7 @@ instance IsCommand CmdSplit where
   runCommand (CmdSplit{..}) = do
     env <- ask
     let getKey = getSubrec env splitKey
-    let split file source = runConduitRes $ withHeader env source $ \h -> linesCE .| splitCE (toFile getKey file) h
+    let split file source = runConduitRes $ withHeader env source $ \h -> linesCE .| splitCE (toFile getKey file) splitMkdir h
     sequence_ $ zipWith split (inputFiles env) (inputSources env)
     where
     toFile fk inFile = \rec -> unpack $ replace "{s}" (value rec) template
@@ -126,7 +128,8 @@ instance IsCommand CmdSplit where
 
 data CmdReplace = CmdReplace {
   replaceDictFile :: FilePath,
-  replaceSubrec, replaceDictKey, replaceDictValue :: Subrec
+  replaceSubrec, replaceDictKey, replaceDictValue :: Subrec,
+  replaceDelete :: Bool
   } deriving Show
 instance IsCommand CmdReplace where
   commandInfo = CmdInfo {
@@ -136,6 +139,7 @@ instance IsCommand CmdReplace where
       replaceDictKey <- subrecOpt (long "key" ++ short 'k' ++ help "Dict key subrecord" ++ value (singleField 0))
       replaceDictValue <- subrecOpt (long "val" ++ help "Dict value subrecord" ++ value (singleField 1))
       replaceSubrec <- subrecOpt $ long "sub" ++ help "Subrecord to replace" ++ value []
+      replaceDelete <- switch $ long "delete" ++ short 'd' ++ help "Delete lines with subrecords not in dictionary"
       return CmdReplace{..}
     }
 
@@ -145,6 +149,6 @@ instance IsCommand CmdReplace where
     dict <- runConduitRes $ sourceFile replaceDictFile .| linesCE .| foldlCE
       (\m s -> uncurry insertMap (getKeyValue env replaceDictKey replaceDictValue s) m)
       (mempty :: HashMap ByteString _)
-    let replaceC =  (.| linesCE .| dictReplaceCE dict sub .| unlinesCE)
+    let replaceC =  (.| linesCE .| dictReplaceCE replaceDelete dict sub .| unlinesCE)
     runConduitRes $ withInputSourcesH env $
       \header sources -> (yieldMany header >> mapM_ replaceC sources) .| stdoutC

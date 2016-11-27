@@ -145,9 +145,13 @@ breakAfterEOL :: ByteString -> (ByteString, ByteString)
 breakAfterEOL = second uncons . break (== 10) >>> \(x, m) -> maybe (x, "") (first (snoc x)) m
 
 -- replaceConduit :: HashMap ByteString ByteString -> Conduit ByteString m ByteString
-dictReplaceCE :: (MapValue map ~ k, ContainerKey map ~ k, IsMap map, Functor f, Monad m) =>
-  map -> ASetter s t k k -> Conduit (f s) m (f t)
-dictReplaceCE dict subrec = mapC $ map $ subrec %~ \x -> fromMaybe x $ lookup x dict
+-- dictReplaceCE :: (MapValue map ~ k, ContainerKey map ~ k, IsMap map, Functor f, Monad m) =>
+  -- Bool -> map -> ASetter s t k k -> Conduit (f s) m (f t)
+dictReplaceCE :: (MapValue map ~ k, ContainerKey map ~ k, IsMap map, Monad m) =>
+  Bool -> map -> ALens s b k k -> Conduit [s] m [b]
+dictReplaceCE delete dict subrec = if
+  | delete -> mapC $ mapMaybe $ cloneLens subrec $ \x -> lookup x dict
+  | otherwise -> mapCE $ cloneLens subrec %~ \x -> fromMaybe x $ lookup x dict
 
 subrecFilterCE :: (IsSequence b, Monad m) => (a -> Bool) -> Getting a (Element b) a -> Conduit b m b
 subrecFilterCE p subrec = mapC $ filter $ p . view subrec
@@ -158,8 +162,8 @@ sinkMultiFile :: (IOData a, MonadIO m) => Sink (FilePath, a) m ()
 sinkMultiFile = mapM_C $ \(file, line) ->  liftIO $
   withBinaryFile file AppendMode (`hPutStrLn` line)
 
-splitCE :: (MonadIO m) => (ByteString -> FilePath) -> Maybe ByteString -> Sink [ByteString] m ()
-splitCE toFile mheader = foldMCE go (mempty :: Set FilePath) >> return ()
+splitCE :: (MonadIO m) => (ByteString -> FilePath) -> Bool -> Maybe ByteString -> Sink [ByteString] m ()
+splitCE toFile mkdir mheader = foldMCE go (mempty :: Set FilePath) >> return ()
   where
   go files rec = liftIO $ if
     | file `member` files -> files <$ withBinaryFile file AppendMode (\h -> hPutStrLn h rec)
@@ -167,9 +171,13 @@ splitCE toFile mheader = foldMCE go (mempty :: Set FilePath) >> return ()
     where
     file = toFile rec
   newfile = case mheader of
-    Nothing -> \file rec -> withBinaryFile file AppendMode $ \h -> hPutStrLn h rec
-    Just header -> \file rec -> withBinaryFile file WriteMode $ \h -> hPutStrLn h header >> hPutStrLn h rec
-
+    Nothing -> \file rec -> do
+      newdir file
+      withBinaryFile file AppendMode $ \h -> hPutStrLn h rec
+    Just header -> \file rec -> do
+      newdir file
+      withBinaryFile file WriteMode $ \h -> hPutStrLn h header >> hPutStrLn h rec
+  newdir file = when mkdir $ createDirectoryIfMissing True (takeDirectory file)
 -- -- works slower than `joinCE` above
 -- joinCE :: (Ord k, Monad m) => (a -> k) -> (a -> v) -> [Source m a] -> Producer m (k, [v])
 -- joinCE key val = mergeResumable . fmap newResumableSource
