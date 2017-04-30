@@ -12,6 +12,7 @@ import           Data.Conduit.Zlib     (ungzip)
 import           System.IO             (IOMode (..), withBinaryFile)
 -- import Control.Monad.Trans.Maybe (MaybeT(..))
 -- import qualified Data.Vector as V
+import           Data.These      (These (..))
 
 import           Data.Conduit.Internal (ConduitM (..), Pipe (..))
 import qualified Data.Conduit.Internal as CI
@@ -153,6 +154,26 @@ joinCE jopts@JoinOpts{..} [ConduitM !left0, ConduitM !right0] = ConduitM $ \rest
   -- [ConduitM !left0, ConduitM !right0] = map (mapOutput $ map joinKeyValue) inputs
   -- finishL = map (\(k,v) -> joinCombine [k, v, mempty]) . fromList
   -- finishR = map (\(k,v) -> joinCombine [k, mempty, v]) . fromList
+
+-- | TODO: somehow unite with `joinCE`
+mergeOrderedSources :: (Ord a, Monad m)
+  => Source m (a, b) -> Source m (a, b) -> Source m (a, These b b)
+mergeOrderedSources (ConduitM left0) (ConduitM right0) = ConduitM $ \rest -> let
+  go (Done ()) r = CI.mapOutput (second That) r >> rest ()
+  go l (Done ()) = CI.mapOutput (second This) l >> rest ()
+  go (Leftover left ()) right = go left right
+  go left (Leftover right ())  = go left right
+  go (NeedInput _ c) right = go (c ()) right
+  go left (NeedInput _ c) = go left (c ())
+  go (PipeM mx) (PipeM my) = PipeM (liftM2 go mx my)
+  go (PipeM mx) y@HaveOutput{} = PipeM (liftM (\x -> go x y) mx)
+  go x@HaveOutput{} (PipeM my) = PipeM (liftM (go x) my)
+  go xs@(HaveOutput srcx closex (k1, v1)) ys@(HaveOutput srcy closey (k2, v2)) =
+    case compare k1 k2 of
+      LT -> HaveOutput (go srcx ys) closex $ (k1, This v1)
+      GT -> HaveOutput (go xs srcy) closey $ (k2, That v2)
+      EQ -> HaveOutput (go srcx srcy) (closex >> closey) (k1, These v1 v2)
+  in go (left0 Done) (right0 Done)
 
 -- | Merge multiple sorted sources into one sorted producer.
 
@@ -325,3 +346,31 @@ bsBuilderC size = loop mempty
     let accum' = accum ++ bytes x in if
       | builderLength accum' >= size -> yield (builderBytes accum') >> loop mempty
       | otherwise -> loop accum')
+
+-- @cropRangeC f (a, b)@ filters a subset of values between @a@ and @b@ from ordered stream of values
+cropRangeC :: (Monad m, Ord b) => (a -> b) -> (b, b) -> Conduit a m a
+cropRangeC f (start, end) = skip
+  where
+  skip = awaitJust $ \row -> let x = f row in if x >= start then leftover row >> go else skip
+  go = awaitJust $ \row -> let x = f row in when (x <= end) (yield row >> go)
+
+-- newtype FieldName = FieldName (unFieldName :: Text) deriving (Show, Eq, Ord)
+
+columnsSource :: Monad m => Source m LineBS -> FilePath -> (ByteString -> Bool)
+   -> m (ByteString, [ByteString], ResumableSource m [ByteString])
+columnsSource source file selectColumn = (source $$+ headC) >>= \case
+    (resum, Nothing) -> closeResumableSource resum >>= error ("Empty file: " ++ file)
+    (resum, Just (LineString header)) -> let
+      (indices, cols) = unzip [(i, col) | (i, col) <- zip [0..] allCols, selectColumn col]
+      filterCols = if
+        | cols == allCols -> id
+        | otherwise -> getIndices indices
+      allCols = readTsvBs header
+      in return (header, cols, resum $=+ mapC (filterCols . readTsvBs . unLineString))
+
+getIndices :: [Int] -> [a] -> [a]
+getIndices ks = go (\_ -> []) $ reverse diffs
+  where
+  diffs = take 1 ks ++ map (subtract 1) (zipWith (-) (drop 1 ks) ks)
+  go f [] = f
+  go f (i:is) = go ((\(x:xs) -> x : f xs) . drop i) is
