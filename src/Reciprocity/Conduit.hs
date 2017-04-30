@@ -2,10 +2,11 @@
 
 module Reciprocity.Conduit where
 
-import CustomPrelude
+import ReciprocityPrelude
 import Reciprocity.Base
 
 import qualified Data.ByteString.Char8 as BC
+import qualified Data.ByteString.Lazy as BL
 import qualified Data.Conduit.Binary   as CB
 import           Data.Conduit.Zlib     (ungzip)
 import           System.IO             (IOMode (..), withBinaryFile)
@@ -15,24 +16,69 @@ import           System.IO             (IOMode (..), withBinaryFile)
 import           Data.Conduit.Internal (ConduitM (..), Pipe (..))
 import qualified Data.Conduit.Internal as CI
 import           Codec.Archive.Zip
+import qualified ByteString.TreeBuilder as Builder
+import qualified Codec.Compression.GZip as GZ
+import Path.IO (resolveFile')
+import Path (setFileExtension, filename)
+import ByteString.StrictBuilder (builderBytes, builderLength, bytes)
+
+newtype LineString s = LineString { unLineString :: s } deriving (Show, Eq, Ord)
+type LineBS = LineString ByteString
+
+linesC :: Monad m => Conduit ByteString m LineBS
+linesC = mapOutput LineString CB.lines
+
+joinLinesC :: Monad m => Conduit LineBS m ByteString
+joinLinesC = awaitForever (\s -> yield (unLineString s) >> yield "\n") .| bsBuilderC (32*1024)
+
+unlinesBSC :: Monad m => Conduit LineBS m ByteString
+unlinesBSC = mapC ((`snoc` c2w '\n') . unLineString)
+
+useHeader :: Monad m => (o -> ConduitM o o m ()) -> ConduitM o o m ()
+useHeader c = awaitJust $ \h -> yield h >> c h
+
+dropHeader :: Monad m => Conduit LineBS m LineBS
+dropHeader = do
+  awaitJust $ \h -> when (not $ "id" `isPrefixOf` unLineString h) (leftover h)
+  awaitForever yield
+
+-- concatWithHeaders :: Monad m => [Conduit LineBS m LineBS] -> Conduit LineBS m LineBS
+concatWithHeaders :: Monad m => [ConduitM a LineBS m ()] -> ConduitM a LineBS m ()
+concatWithHeaders sources = forM_ (zip [0..] sources) $ \case
+  (0, s) -> s
+  (_, s) -> s .| dropHeader
+
+
+produceZip :: Bool -> FilePath -> Source (ResourceT IO) ByteString -> IO [Text]
+produceZip overwrite outFile source = do
+  exists <- doesFileExist outFile
+  if | exists && not overwrite ->
+        return [pack $ "Output file exists, skipping: " ++ outFile]
+     | otherwise -> do
+        unless exists $ createDirectoryIfMissing True (takeDirectory outFile)
+        path <- resolveFile' outFile
+        entryName <- setFileExtension "txt" $ filename path
+        entrySel <- mkEntrySelector entryName
+        createArchive path $ sinkEntry Deflate source entrySel
+        return []
 
 -- * Producers
 
-inputSource :: (MonadResource m, StringLike s) => FilePath -> Source m s
-inputSource file = source
-  where
-  source = if
-    | file == "-" -> stdinC
-    | ".gz" `isSuffixOf` file -> sourceFile file .| ungzip
-    | ".zip" `isSuffixOf` file -> join $ liftIO $ withArchive file $ do
-        [entry] <- entryNames
-        getSource entry
-    | otherwise -> sourceFile file
+inputC :: MonadResource m => FilePath -> Source m ByteString
+inputC inFile = case takeExtension inFile of
+  ".zip" -> join $ liftIO $ do
+    path <- resolveFile' inFile
+    withArchive path $ do
+      entries <- keys <$> getEntries
+      if | [entry] <- entries -> getEntrySource entry
+         | otherwise -> error $ "More than one entry in zip file: " ++ inFile
+  ".gz" -> sourceFile inFile $= ungzip
+  _ -> sourceFile inFile
 
 inputSources :: (MonadResource m, s ~ ByteString) => Env s -> [Source m s]
 inputSources Env{..} = case optsInputs envOpts of
   []     -> [stdinC]
-  inputs -> map inputSource inputs
+  inputs -> map inputC inputs
 
 inputFiles :: Env s -> [FilePath]
 inputFiles Env{..} = case optsInputs envOpts of
@@ -52,6 +98,15 @@ withInputSourcesH env combine = if
   where
   sources = inputSources env
   Opts{..} = envOpts env
+
+-- withInputSources :: forall (m :: * -> *) b. MonadResource m =>
+  -- Env ByteString -> ConduitM ByteString ByteString m b -> ConduitM () ByteString m b
+withInputSources :: MonadResource m =>
+    Env ByteString
+    -> (ByteString -> ConduitM ByteString ByteString m b)
+    -> ConduitM () ByteString m b
+withInputSources env c = withInputSourcesH env $
+  \(Just header) sources -> yield header >> sequence_ sources .| (c header)
 
 maybeAddEOL :: ByteString -> Maybe ByteString
 maybeAddEOL = nonempty Nothing (Just . (`snoc` 10))
@@ -123,8 +178,8 @@ mergeSourcesOn key = mergeResumable . fmap newResumableSource . toList
 
 -- * Transformers
 
-linesC :: Monad m => Conduit ByteString m ByteString
-linesC = CB.lines
+-- linesC :: Monad m => Conduit ByteString m ByteString
+-- linesC = CB.lines
 
 linesCE :: Monad m => Conduit ByteString m [ByteString]
 linesCE = lineChunksC .| mapC BC.lines
@@ -158,26 +213,37 @@ subrecFilterCE p subrec = mapC $ filter $ p . view subrec
 
 -- * Consumers
 
-sinkMultiFile :: (IOData a, MonadIO m) => Sink (FilePath, a) m ()
+sinkMultiFile :: (MonadIO m) => Sink (FilePath, ByteString) m ()
 sinkMultiFile = mapM_C $ \(file, line) ->  liftIO $
-  withBinaryFile file AppendMode (`hPutStrLn` line)
+  withBinaryFile file AppendMode (`BC.hPutStrLn` line)
 
-splitCE :: (MonadIO m) => (ByteString -> FilePath) -> Bool -> Maybe ByteString -> Sink [ByteString] m ()
-splitCE toFile mkdir mheader = foldMCE go (mempty :: Set FilePath) >> return ()
+splitCE :: (MonadIO m, MonoFoldable mono, Element mono ~ ByteString) =>
+  (ByteString -> FilePath) -> Bool -> Bool -> Maybe ByteString -> Sink mono m ()
+splitCE toFile mkdir compress mheader =
+   foldlCE (\m rec -> insertWith (flip (++)) (toFile rec) (builder rec) m) (asHashMap mempty) >>=
+   liftIO . mapM_ writeRecs . mapToList
   where
-  go files rec = liftIO $ if
-    | file `member` files -> files <$ withBinaryFile file AppendMode (\h -> hPutStrLn h rec)
-    | otherwise -> insertSet file files <$ newfile file rec
-    where
-    file = toFile rec
-  newfile = case mheader of
-    Nothing -> \file rec -> do
-      newdir file
-      withBinaryFile file AppendMode $ \h -> hPutStrLn h rec
-    Just header -> \file rec -> do
-      newdir file
-      withBinaryFile file WriteMode $ \h -> hPutStrLn h header >> hPutStrLn h rec
+  builder rec = Builder.byteString rec ++ Builder.asciiChar '\n'
+  writeRecs = case mheader of
+    Nothing -> \(file, b) -> writeBuilder file b
+    Just header -> \(file, b) -> writeBuilder file (builder header ++ b)
+  writeBuilder file b = newdir file >> BL.writeFile file (whenC compress gzip $ Builder.toLazyByteString b)
+  gzip = GZ.compressWith $ GZ.defaultCompressParams { GZ.compressLevel = GZ.bestSpeed }
+
+  -- go files rec = liftIO $ if
+  --   | file `member` files -> files <$ withBinaryFile file AppendMode (\h -> hPutStrLn h rec)
+  --   | otherwise -> insertSet file files <$ newfile file rec
+  --   where
+  --   file = toFile rec
+  -- newfile = case mheader of
+  --   Nothing -> \file rec -> do
+  --     newdir file
+  --     withBinaryFile file AppendMode $ \h -> hPutStrLn h rec
+  --   Just header -> \file rec -> do
+  --     newdir file
+  --     withBinaryFile file WriteMode $ \h -> hPutStrLn h header >> hPutStrLn h rec
   newdir file = when mkdir $ createDirectoryIfMissing True (takeDirectory file)
+
 -- -- works slower than `joinCE` above
 -- joinCE :: (Ord k, Monad m) => (a -> k) -> (a -> v) -> [Source m a] -> Producer m (k, [v])
 -- joinCE key val = mergeResumable . fmap newResumableSource
@@ -246,3 +312,16 @@ infixr 9 .!
 
 bucket :: Int -> ByteString -> Int
 bucket n s = 1 + hash s `mod` n
+
+
+awaitJust :: Monad m => (i -> ConduitM i o m ()) -> ConduitM i o m ()
+awaitJust f = await >>= maybe (return ()) f
+
+
+bsBuilderC :: Monad m => Int -> ConduitM ByteString ByteString m ()
+bsBuilderC size = loop mempty
+  where
+  loop accum = await >>= maybe (if builderLength accum == 0 then return () else yield (builderBytes accum)) (\x ->
+    let accum' = accum ++ bytes x in if
+      | builderLength accum' >= size -> yield (builderBytes accum') >> loop mempty
+      | otherwise -> loop accum')

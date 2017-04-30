@@ -1,6 +1,6 @@
 module Main where
 
-import CustomPrelude
+import ReciprocityPrelude
 import Reciprocity.Base
 import Reciprocity.Command.Base
 import Reciprocity.Command.Builtin
@@ -11,15 +11,15 @@ main = do
   -- print (opts, cmd)
   runReaderT (runCommand cmd) (getEnv opts)
   where
-  parser = info (helper <*> optsParser) $ progDesc ""
-
-optsParser :: Parser (Command, Opts)
-optsParser = do
-  optsSep <- textOpt id (short 'd' ++ help "Delimiter (default is TAB)" ++ value "\t")
-  optsHeader <- switch (short 'H' ++ help "Assume header row in each input")
-  cmd <- commandParser
-  optsInputs <- many (strArgument (metavar "INPUT"))
-  return (cmd, Opts{..})
+  parser = info (helper <*> liftA2 (,) commandParser optsParser) $ progDesc ""
+--
+-- optsParser :: Parser (Command, Opts)
+-- optsParser = do
+--   optsSep <- textOpt id (short 'd' ++ help "Delimiter (default is TAB)" ++ value "\t")
+--   optsHeader <- switch (short 'H' ++ help "Assume header row in each input")
+--   cmd <- commandParser
+--   optsInputs <- many (strArgument (metavar "INPUT"))
+--   return (cmd, Opts{..})
 
 commandParser :: Parser Command
 commandParser = subparser (mconcat

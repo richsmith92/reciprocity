@@ -15,10 +15,10 @@ mkdir -p $map_dir
 
 
 function par() {
-  parallel --nice=20 -j$NM $@
+  parallel --eta --nice=10 -j$NM $@
 }
 function split() {
-  rp split --mkdir --key=$key --out="$map_dir/{s}.$1j$(printf %05d $2)"
+  rp split -z --mkdir --key=$key --out="$map_dir/{s}/$1j$(printf %05d $2).gz"
 }
 export -f split
 

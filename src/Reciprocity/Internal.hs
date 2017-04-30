@@ -1,4 +1,3 @@
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 {-# LANGUAGE BangPatterns #-}
@@ -17,7 +16,7 @@ import           System.IO.Unsafe (unsafePerformIO)
 import Data.Int
 import Data.Word
 import Foreign.Ptr
-import CustomPrelude
+import ReciprocityPrelude
 
 foreign import ccall unsafe "static c_subrec" subrec_ffi
   :: CUChar -> Ptr CChar -> CLong -> CLong -> CLong -> CLong -> Ptr CLong -> IO CInt

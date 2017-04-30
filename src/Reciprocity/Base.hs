@@ -1,7 +1,7 @@
 {-# LANGUAGE BangPatterns #-}
 module Reciprocity.Base where
 
-import CustomPrelude
+import ReciprocityPrelude
 import qualified Data.ByteString as B
 -- import qualified Data.ByteString.Unsafe as B
 import Reciprocity.Internal

@@ -20,7 +20,7 @@ function par() {
   parallel --nice=20 -j$NM $@
 }
 function partition() {
-  rp --key=$key split --partition --buckets=$NR --out="$map_dir/{s}/$1j$(printf %05d $2)"
+  rp split -z --key=$key --partition --buckets=$NR --out="$map_dir/{s}/$1j$(printf %05d $2).gz"
 }
 export -f partition
 
@@ -29,6 +29,6 @@ if [ -z "$inputs" ]; then
   par --pipe $mapper \| partition \'\' {#}
 else
   # enumerate files; put mapper output into {reducer id}/{file#}.{job#}
-  find $inputs -maxdepth 1 -type f | awk '{printf("%05d\t%s\n",++i,$0)}' | par -C'\t' \< {2} $mapper \| partition {1}. {#}
+  find $inputs -maxdepth 1 -type f | awk '{printf("%05d\t%s\n",++i,$0)}' | par --eta -C'\t' \< {2} $mapper \| partition {1}. {#}
 fi
 find $map_dir -empty -delete

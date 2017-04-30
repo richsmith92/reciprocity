@@ -1,6 +1,9 @@
-module Reciprocity.Command.Base (module Reciprocity.Command.Base, module Options.Applicative, module Reciprocity.Conduit) where
+module Reciprocity.Command.Base (
+  module Reciprocity.Command.Base,
+  module Options.Applicative,
+  module Reciprocity.Conduit) where
 
-import CustomPrelude
+import ReciprocityPrelude
 import Reciprocity.Base
 import Reciprocity.Conduit
 
@@ -22,6 +25,13 @@ deriving instance Show Command
 -- * Option parsing
 
 type OptParser a = Mod OptionFields a -> Parser a
+
+optsParser :: Parser Opts
+optsParser = do
+  optsSep <- textOpt id (short 'd' ++ help "Delimiter (default is TAB)" ++ value "\t")
+  optsHeader <- switch (short 'H' ++ help "Assume header row in each input")
+  optsInputs <- many (strArgument (metavar "INPUT"))
+  return (Opts{..})
 
 fileOpt :: OptParser FilePath
 fileOpt mods = option str (mods ++ metavar "FILE")
@@ -49,7 +59,7 @@ keyOpt :: Parser Subrec
 keyOpt = subrecOpt (long "key" ++ short 'k' ++ help "Key subrecord")
 
 valueOpt :: Parser Subrec
-valueOpt = subrecOpt (long "val" ++ help "Value subrecord")
+valueOpt = subrecOpt (long "val" ++ short 'v' ++ help "Value subrecord")
 
 funOpt :: Mod OptionFields Text -> Parser Text
 funOpt mods = textOpt id (mods ++ metavar "FUN" ++ value "")

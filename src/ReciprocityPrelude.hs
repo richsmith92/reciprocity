@@ -4,7 +4,7 @@
 
 -- | Minimal set of utils we need most frequently.
 
-module CustomPrelude (module CustomPrelude, module R) where
+module ReciprocityPrelude (module ReciprocityPrelude, module R) where
 
 import ClassyPrelude.Conduit as R hiding ((<.>))
 import Control.Arrow         as R ((<<<), (>>>))

@@ -1,6 +1,6 @@
 module Reciprocity.Command.Builtin where
 
-import CustomPrelude
+import ReciprocityPrelude
 import Reciprocity.Base
 import Reciprocity.Command.Base
 -- import Reciprocity.Hint
@@ -42,9 +42,10 @@ instance IsCommand CmdMerge where
     }
   runCommand CmdMerge{..} = do
     env <- ask
-    let merge = mergeSourcesOn $ getSubrec env mergeKey
+    let merge = mergeSourcesOn $ getSubrec env mergeKey . unLineString
     runConduitRes $ withInputSourcesH env $
-      \header sources -> (yieldMany header >> merge (map (.| linesC) sources) .| unlinesAsciiC) .| stdoutC
+      \header sources -> (yieldMany (LineString <$> header) >> merge (map (.| linesC) sources)) .|
+        joinLinesC .| stdoutC
     where
 
 -- * Join
@@ -89,8 +90,7 @@ instance IsCommand CmdJoin where
 
 data CmdSplit = CmdSplit {
   splitKey :: Subrec,
-  splitPartition :: Bool,
-  splitMkdir :: Bool,
+  splitPartition, splitMkdir, splitCompress :: Bool,
   splitBuckets  :: Natural,
   splitTemplate :: Text
   } deriving (Show)
@@ -103,6 +103,8 @@ instance IsCommand CmdSplit where
       splitPartition <- switch (long "partition" ++
         help "MapReduce partition mode: split into buckets determined by hash of the key")
       splitMkdir <- switch (long "mkdir" ++ help "Create directories for output files")
+      splitCompress <- switch (long "compress" ++ short 'z' ++ help "Compress output with gzip")
+      -- splitGreedy <- switch (long "greedy" ++ help "Instead of streaming, read all input file into memory")
       splitBuckets <- natOpt
         (long "buckets" ++ help "Number of buckets" ++ value 1)
       splitTemplate <- textOpt id (long "out" ++ value "{s}.{filename}" ++ help "Output filepath template (appended to input filename)")
@@ -112,7 +114,8 @@ instance IsCommand CmdSplit where
   runCommand (CmdSplit{..}) = do
     env <- ask
     let getKey = getSubrec env splitKey
-    let split file source = runConduitRes $ withHeader env source $ \h -> linesCE .| splitCE (toFile getKey file) splitMkdir h
+    let split file source = runConduitRes $ withHeader env source $
+          \h -> linesCE .| splitCE (toFile getKey file) splitMkdir splitCompress h
     sequence_ $ zipWith split (inputFiles env) (inputSources env)
     where
     toFile fk inFile = \rec -> unpack $ replace "{s}" (value rec) template
