@@ -8,8 +8,11 @@ module ReciprocityPrelude (module ReciprocityPrelude, module R) where
 
 import ClassyPrelude.Conduit as R hiding ((<.>))
 import Control.Arrow         as R ((<<<), (>>>))
-import Control.Lens          as R hiding (Index, argument, cons, enum, index, snoc, uncons, unsnoc,
-                                   (<&>), (<.>), (<|))
+import Control.Lens          as R hiding
+  (Index, argument, cons, enum, index, snoc, uncons, unsnoc, both, noneOf
+  , (<&>), (<.>), (<|), (.=))
+import Control.Error.Util          as R
+  (bimapExceptT, err, errLn, exceptT, hoistEither, hush, note, (!?))
 
 import qualified Control.Category         as Cat
 import           Data.ByteString.Internal as R (c2w, w2c)
@@ -18,12 +21,15 @@ import Data.Data     as R (Data)
 import Data.Function as R (fix, (&))
 import Data.List     as R (foldl1, foldr1, nub)
 import Extra         as R (dupe, groupOn, groupSort, groupSortOn)
+import Data.Monoid as R hiding ((<>))
 
 import Numeric.Natural as R
-
-import System.Directory as R (createDirectoryIfMissing, doesFileExist, getHomeDirectory, removeFile)
-import System.FilePath  as R (dropExtension, splitExtension, takeBaseName, takeDirectory,
-                              takeExtension, takeFileName)
+import System.Directory as R
+  (createDirectoryIfMissing, doesFileExist, doesDirectoryExist
+  , getHomeDirectory, removeFile, getHomeDirectory)
+import System.FilePath  as R
+  ( dropExtension, splitExtension, takeBaseName, takeDirectory, splitDirectories
+  , takeExtension, takeFileName, joinPath, hasTrailingPathSeparator)
 
 read :: (Read a, Textual s) => s -> a
 read s = fromMaybe (error $ "read: " ++ unpack s) $ readMay s
@@ -43,12 +49,16 @@ readTsvLines = map readTsv . lines
 
 showTsvLines :: (IsString s, IsSequence s) => [[s]] -> s
 showTsvLines = concatMap showTsvLn
---
--- terr :: Text -> IO ()
--- terr = err . unpack
---
--- terrLn :: Text -> IO ()
--- terrLn = errLn . unpack
+
+readTsvBs :: ByteString -> [ByteString]
+readTsvBs = splitElem (c2w '\t')
+
+
+terr :: Text -> IO ()
+terr = err . unpack
+
+terrLn :: Text -> IO ()
+terrLn = errLn . unpack
 
 -- | Wrapper for 'ofoldl\'' with more convenient type
 foldEndo' :: (MonoFoldable t) => (Element t -> b -> b) -> t -> b -> b
@@ -58,6 +68,11 @@ foldEndo' f = flip $ ofoldl' (flip f)
 infixl 4 <.>
 (<.>) ::  Functor f => (b -> c) -> (a -> f b) -> a -> f c
 f <.> g = fmap f . g
+
+-- | Flipped infix 'fmap'
+infixl 1 <&>
+(<&>) :: Functor f => f a -> (a -> b) -> f b
+as <&> f = f <$> as
 
 enum :: (Enum a, Bounded a) => [a]
 enum = enumFrom minBound
@@ -88,29 +103,12 @@ mwhen b x = if b then x else mempty
 munless :: (Monoid a) => Bool -> a -> a
 munless b x = if b then mempty else x
 
-orEmpty :: Alternative f => Bool -> a -> f a
-orEmpty b a = if b then pure a else empty
+toAlt :: Alternative f => Bool -> a -> f a
+toAlt b a = if b then pure a else empty
 
 nonempty :: (MonoFoldable t) => a -> (t -> a) -> t -> a
 nonempty def f xs = if null xs then def else f xs
 
--- | breakOnParts "-- ::" "yyyy-dd-mm hh:mm:ss" ==
---  ["yyyy", "dd", "mm", "hh", "mm", "ss"]
-breakOnParts :: Eq a => [a] -> [a] -> [[a]]
-breakOnParts [] xs = [xs]
-breakOnParts _ [] = [[]]
-breakOnParts (sep:seps) (x:xs) = if x == sep then [] : breakOnParts seps xs
-  else let (part:parts) = breakOnParts (sep:seps) xs in (x : part) : parts
-
 fromRight :: Either String a -> a
 fromRight (Left s)  = error s
 fromRight (Right x) = x
---
--- parallelMapM :: (a -> IO b) -> [a] -> IO [b]
--- parallelMapM f = parallel . map f
---
--- parallelMapM_ :: (a -> IO b) -> [a] -> IO ()
--- parallelMapM_ f = parallel_ . map f
---
--- parallelMap :: (a -> b) -> [a] -> [b]
--- parallelMap = parMap rpar

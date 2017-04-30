@@ -7,7 +7,7 @@ import ReciprocityPrelude
 import Reciprocity.Base
 import Reciprocity.Conduit
 
-import Options.Applicative hiding ((<>))
+import Options.Applicative
 import           System.Directory             (getHomeDirectory)
 
 data CmdInfo c = CmdInfo {
