@@ -33,6 +33,7 @@ import System.FilePath  as R
 
 read :: (Read a, Textual s) => s -> a
 read s = fromMaybe (error $ "read: " ++ unpack s) $ readMay s
+{-# DEPRECATED read "You should use readMay or other safe functions" #-}
 
 type Pair a = (a, a)
 
@@ -52,7 +53,6 @@ showTsvLines = concatMap showTsvLn
 
 readTsvBs :: ByteString -> [ByteString]
 readTsvBs = splitElem (c2w '\t')
-
 
 terr :: Text -> IO ()
 terr = err . unpack
@@ -74,9 +74,11 @@ infixl 1 <&>
 (<&>) :: Functor f => f a -> (a -> b) -> f b
 as <&> f = f <$> as
 
+-- @ enum = enumFrom minBound @
 enum :: (Enum a, Bounded a) => [a]
 enum = enumFrom minBound
 
+-- prop> @nan = 0/0@
 nan :: Floating a => a
 nan = 0 / 0
 
@@ -84,6 +86,8 @@ nanToZero :: RealFloat a => a -> a
 nanToZero x = if isNaN x then 0 else x
 
 -- | Boolean operation for arrows.
+-- > whenC True f = f
+-- > whenC False _ = id
 --
 whenC :: (Cat.Category cat) => Bool -> cat a a -> cat a a
 whenC b f = if b then f else Cat.id

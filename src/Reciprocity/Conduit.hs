@@ -348,25 +348,47 @@ bsBuilderC size = loop mempty
       | otherwise -> loop accum')
 
 -- @cropRangeC f (a, b)@ filters a subset of values between @a@ and @b@ from ordered stream of values
-cropRangeC :: (Monad m, Ord b) => (a -> b) -> (b, b) -> Conduit a m a
-cropRangeC f (start, end) = skip
+cropRangeC :: (Monad m, Ord b) => (a -> b) -> (Maybe b, Maybe b) -> Conduit a m a
+cropRangeC f = \case
+  (Nothing, Nothing) -> mapC id
+  (Nothing, Just end) -> go2 end
+  (Just start, Nothing) -> go1 start (mapC id)
+  (Just start, Just end) -> go1 start (go2 end)
   where
-  skip = awaitJust $ \row -> let x = f row in if x >= start then leftover row >> go else skip
-  go = awaitJust $ \row -> let x = f row in when (x <= end) (yield row >> go)
+  go1 start next = loop
+    where loop = awaitJust $ \row -> let x = f row in if x >= start then leftover row >> next else loop
+  go2 end = loop
+    where loop = awaitJust $ \row -> let x = f row in when (x <= end) (yield row >> loop)
 
 -- newtype FieldName = FieldName (unFieldName :: Text) deriving (Show, Eq, Ord)
 
-columnsSource :: Monad m => Source m LineBS -> FilePath -> (ByteString -> Bool)
-   -> m (ByteString, [ByteString], ResumableSource m [ByteString])
-columnsSource source file selectColumn = (source $$+ headC) >>= \case
-    (resum, Nothing) -> closeResumableSource resum >>= error ("Empty file: " ++ file)
-    (resum, Just (LineString header)) -> let
-      (indices, cols) = unzip [(i, col) | (i, col) <- zip [0..] allCols, selectColumn col]
+data ColumnParams col = ColumnParams {
+  colInputName :: String, -- ^ Input filename to be printed in error messages
+  colNameFilter :: col -> Bool  -- ^ Which column names to include
+  }
+
+data ColumnInfo col = ColumnInfo {
+  colHeader :: ByteString, -- ^ whole header row, unprocessed
+  colNames :: [col] -- ^ Filtered column names, to be zipped with values
+  }
+
+withColumns :: Monad m => m (t, ResumableSource m a) -> (t -> Sink a m b) -> m b
+withColumns colSource toSink = do
+  (colInfo, resum) <- colSource
+  resum $$+- toSink colInfo
+
+columnsSource :: Monad m
+  => ColumnParams ByteString -> Source m LineBS
+  -> m (ColumnInfo ByteString, ResumableSource m [ByteString]) -- ^ header line, column names and columns resumable source
+columnsSource ColumnParams{..} source = (source $$+ headC) >>= \case
+    (resum, Nothing) -> closeResumableSource resum >>= error ("Empty file: " ++ colInputName)
+    (resum, Just (LineString colHeader)) -> let
+      (indices, colNames) = unzip [(i, col) | (i, col) <- zip [0..] allCols, colNameFilter col]
       filterCols = if
-        | cols == allCols -> id
+        | colNames == allCols -> id
         | otherwise -> getIndices indices
-      allCols = readTsvBs header
-      in return (header, cols, resum $=+ mapC (filterCols . readTsvBs . unLineString))
+      allCols = readTsvBs colHeader
+      in return (ColumnInfo{..}, resum $=+ mapC (filterCols . readTsvBs . unLineString))
 
 getIndices :: [Int] -> [a] -> [a]
 getIndices ks = go (\_ -> []) $ reverse diffs
