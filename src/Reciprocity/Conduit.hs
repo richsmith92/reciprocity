@@ -35,12 +35,15 @@ joinLinesC = awaitForever (\s -> yield (unLineString s) >> yield "\n") .| bsBuil
 unlinesBSC :: Monad m => Conduit LineBS m ByteString
 unlinesBSC = mapC ((`snoc` c2w '\n') . unLineString)
 
+splitTsvLine :: (Eq (Element b), IsSequence b, IsString b) => LineString b -> [b]
+splitTsvLine = readTsv . unLineString
+
 useHeader :: Monad m => (o -> ConduitM o o m ()) -> ConduitM o o m ()
 useHeader c = awaitJust $ \h -> yield h >> c h
 
 dropHeader :: Monad m => Conduit LineBS m LineBS
 dropHeader = do
-  awaitJust $ \h -> when (not $ "id" `isPrefixOf` unLineString h) (leftover h)
+  awaitJust $ \_h -> return () -- when (not $ "id" `isPrefixOf` unLineString h) (leftover h)
   awaitForever yield
 
 -- concatWithHeaders :: Monad m => [Conduit LineBS m LineBS] -> Conduit LineBS m LineBS
