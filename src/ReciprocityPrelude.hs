@@ -116,3 +116,16 @@ nonempty def f xs = if null xs then def else f xs
 fromRight :: Either String a -> a
 fromRight (Left s)  = error s
 fromRight (Right x) = x
+
+bsIsZero :: ByteString -> Bool
+bsIsZero s = if
+  | "0." `isPrefixOf` s -> oall (== c2w '0') $ drop 2 s
+  | "-0." `isPrefixOf` s -> oall (== c2w '0') $ drop 3 s
+  | otherwise -> s == "0"
+
+negateBs :: ByteString -> ByteString
+negateBs s = if
+  | null s -> s
+  | bsIsZero s -> s
+  | Just (w2c -> '-', val) <- uncons s -> val
+  | otherwise -> cons (c2w '-') s
