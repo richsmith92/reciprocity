@@ -2,10 +2,12 @@ module Reciprocity.Command.Builtin where
 
 import ReciprocityPrelude
 import Reciprocity.Base
+import Reciprocity.Record
 import Reciprocity.Command.Base
 -- import Reciprocity.Hint
 -- import Reciprocity.Compile
 import Data.Char (isSpace)
+import Data.Conduit.Internal (zipSources)
 
 -- import           System.Directory             (getHomeDirectory)
 import Data.Text          (replace)
@@ -71,8 +73,8 @@ instance IsCommand CmdJoin where
 
   runCommand CmdJoin{..} = do
     env <- ask
-    let [s1, s2] = inputSources env
-    runConduitRes $ joinCE (joinOpts env) (map (.| linesCE) [s1, s2]) .| unlinesCE .| stdoutC
+    let [s1, s2] = map (.| linesCE) $ inputSources env
+    runConduitRes $ joinCE (joinOpts env) [s1, s2] .| unlinesCE .| stdoutC
     where
     {-# INLINE joinOpts #-}
     joinOpts env@Env{..} = JoinOpts {
@@ -85,6 +87,35 @@ instance IsCommand CmdJoin where
         [] -> headEx
         _  -> \[k,v1,v2] -> k ++ envSep ++ v1 ++ envSep ++ v2
       }
+
+-- * Diff
+
+data CmdDiff = CmdDiff {
+  } deriving (Show)
+
+instance IsCommand CmdDiff where
+
+  commandInfo = CmdInfo {
+    cmdDesc = "Fieldwise diff. Show only differing fields",
+    cmdParser = pure CmdDiff
+    }
+
+  runCommand CmdDiff = do
+    env <- ask
+    let [src1, src2] = map (.| linesC) $ inputSources env
+    runConduitRes $ zipSources src1 src2 .| concatMapC diffs .| unlinesBSC .| stdoutC
+    where
+    diffs (l1, l2) = if
+      | l1 == l2 -> []
+      | length vals1 /= length vals2 -> [joinTsvFields $ "0": take 1 vals1]
+      | otherwise -> [
+        joinTsvFields [encodeUtf8 (tshow ix), val1, val2]
+        | (ix, val1, val2) <- zip3 [0..] vals1 vals2
+        , val1 /= val2
+      ]
+      where
+      vals1 = splitTsvLine l1
+      vals2 = splitTsvLine l2
 
 -- * Split
 

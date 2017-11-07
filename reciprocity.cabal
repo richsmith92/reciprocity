@@ -26,6 +26,7 @@ library
   exposed-modules:
     ReciprocityPrelude
     Reciprocity.Base
+    Reciprocity.Record
     Reciprocity.Conduit
     Reciprocity.Command.Base
     Reciprocity.Command.Builtin

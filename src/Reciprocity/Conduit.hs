@@ -4,6 +4,7 @@ module Reciprocity.Conduit where
 
 import ReciprocityPrelude
 import Reciprocity.Base
+import Reciprocity.Record
 
 import qualified Data.ByteString.Char8 as BC
 import qualified Data.ByteString.Lazy as BL
@@ -23,9 +24,6 @@ import Path.IO (resolveFile')
 import Path (setFileExtension, filename)
 import ByteString.StrictBuilder (builderBytes, builderLength, bytes)
 
-newtype LineString s = LineString { unLineString :: s } deriving (Show, Eq, Ord)
-type LineBS = LineString ByteString
-
 linesC :: Monad m => Conduit ByteString m LineBS
 linesC = mapOutput LineString CB.lines
 
@@ -34,9 +32,6 @@ joinLinesC = awaitForever (\s -> yield (unLineString s) >> yield "\n") .| bsBuil
 
 unlinesBSC :: Monad m => Conduit LineBS m ByteString
 unlinesBSC = mapC ((`snoc` c2w '\n') . unLineString)
-
-splitTsvLine :: (Eq (Element b), IsSequence b, IsString b) => LineString b -> [b]
-splitTsvLine = readTsv . unLineString
 
 useHeader :: Monad m => (o -> ConduitM o o m ()) -> ConduitM o o m ()
 useHeader c = awaitJust $ \h -> yield h >> c h
@@ -51,7 +46,6 @@ concatWithHeaders :: Monad m => [ConduitM a LineBS m ()] -> ConduitM a LineBS m 
 concatWithHeaders sources = forM_ (zip [0..] sources) $ \case
   (0, s) -> s
   (_, s) -> s .| dropHeader
-
 
 produceZip :: Bool -> FilePath -> Source (ResourceT IO) ByteString -> IO [Text]
 produceZip overwrite outFile source = do
@@ -111,9 +105,6 @@ withInputSources :: MonadResource m =>
     -> ConduitM () ByteString m b
 withInputSources env c = withInputSourcesH env $
   \(Just header) sources -> yield header >> sequence_ sources .| (c header)
-
-maybeAddEOL :: ByteString -> Maybe ByteString
-maybeAddEOL = nonempty Nothing (Just . (`snoc` 10))
 
 withHeader :: MonadIO m =>
   Env t -> Source m ByteString -> (Maybe ByteString -> ConduitM ByteString c m r) -> ConduitM () c m r
@@ -202,9 +193,6 @@ mergeSourcesOn key = mergeResumable . fmap newResumableSource . toList
 
 -- * Transformers
 
--- linesC :: Monad m => Conduit ByteString m ByteString
--- linesC = CB.lines
-
 linesCE :: Monad m => Conduit ByteString m [ByteString]
 linesCE = lineChunksC .| mapC BC.lines
 
@@ -219,9 +207,6 @@ lineChunksC = await >>= maybe (return ()) go
     | otherwise -> await >>= maybe (yield acc) (go' . breakAfterEOL)
     where
     go' (this, next) = let acc' = acc ++ this in if null next then go acc' else yield acc' >> go next
-
-breakAfterEOL :: ByteString -> (ByteString, ByteString)
-breakAfterEOL = second uncons . break (== 10) >>> \(x, m) -> maybe (x, "") (first (snoc x)) m
 
 -- replaceConduit :: HashMap ByteString ByteString -> Conduit ByteString m ByteString
 -- dictReplaceCE :: (MapValue map ~ k, ContainerKey map ~ k, IsMap map, Functor f, Monad m) =>
@@ -329,18 +314,9 @@ joinLists JoinOpts{..} xs ys = go xs ys (mempty :: Seq _)
   appendR = if joinOuterRight then \k v -> append k mempty v else \_ _ -> id
   {-# INLINE append #-}
 
-(.!) :: (b -> c) -> (a -> b) -> a -> c
-(.!) = (.) . ($!)
-{-# INLINE (.!) #-}
-infixr 9 .!
-
-bucket :: Int -> ByteString -> Int
-bucket n s = 1 + hash s `mod` n
-
 
 awaitJust :: Monad m => (i -> ConduitM i o m ()) -> ConduitM i o m ()
 awaitJust f = await >>= maybe (return ()) f
-
 
 bsBuilderC :: Monad m => Int -> ConduitM ByteString ByteString m ()
 bsBuilderC size = loop mempty
@@ -392,10 +368,3 @@ columnsSource ColumnParams{..} source = (source $$+ headC) >>= \case
         | otherwise -> getIndices indices
       allCols = readTsvBs colHeader
       in return (ColumnInfo{..}, resum $=+ mapC (filterCols . readTsvBs . unLineString))
-
-getIndices :: [Int] -> [a] -> [a]
-getIndices ks = go (\_ -> []) $ reverse diffs
-  where
-  diffs = take 1 ks ++ map (subtract 1) (zipWith (-) (drop 1 ks) ks)
-  go f [] = f
-  go f (i:is) = go ((\(x:xs) -> x : f xs) . drop i) is
