@@ -29,8 +29,9 @@ type OptParser a = Mod OptionFields a -> Parser a
 optsParser :: Parser Opts
 optsParser = do
   optsSep <- textOpt id (short 'd' ++ help "Delimiter (default is TAB)" ++ value "\t")
-  optsHeader <- switch (short 'H' ++ help "Assume header row in each input")
+  optsHeader <- not <$> switch (short 'H' ++ long "headerless" ++ help "No header line in inputs")
   optsInputs <- many (strArgument (metavar "INPUT"))
+  optsSubrec <- subrecOpt (value [] ++ long "subrec" ++ short 'c' ++ help "Take subrecord of each input")
   return (Opts{..})
 
 fileOpt :: OptParser FilePath

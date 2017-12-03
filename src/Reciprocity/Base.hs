@@ -1,4 +1,6 @@
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 module Reciprocity.Base where
 
 import ReciprocityPrelude
@@ -9,14 +11,16 @@ import Reciprocity.Internal
 data Opts = Opts {
   optsSep        :: Text,
   optsHeader     :: Bool,
-  optsInputs     :: [FilePath]
+  optsInputs     :: [FilePath],
+  optsSubrec     :: Subrec
   } deriving (Show)
 
 defaultOpts :: Opts
 defaultOpts = Opts {
   optsSep = "\t",
   optsHeader = False,
-  optsInputs = []
+  optsInputs = [],
+  optsSubrec = []
   }
 
 data Env s = Env {
@@ -28,6 +32,17 @@ data Env s = Env {
 
 -- type StringLike a = (IsString a, IOData a, IsSequence a, Eq (Element a), Typeable a)
 type StringLike s = (s ~ ByteString)
+
+-- | String without newline
+newtype LineString s = LineString { unLineString :: s } deriving (Show, Eq, Ord, Monoid, Generic)
+type LineBS = LineString ByteString
+
+instance (t ~ LineString a') => Rewrapped (LineString a) t
+instance Wrapped (LineString s) where
+  type Unwrapped (LineString s) = s
+  _Wrapped' = iso unLineString LineString
+  {-# INLINE _Wrapped' #-}
+instance (Hashable a) => Hashable (LineString a)
 
 type Subrec = [Pair (Maybe Natural)]
 
@@ -46,26 +61,6 @@ getEnv opts@Opts{..} = Env {
   where
   sep = fromString (unpack optsSep)
 
-{-# INLINE getSubrec #-}
-getSubrec :: (StringLike s) => Env s -> Subrec -> s -> s
-getSubrec Env{..} sub = if
-  | [] <- sub -> id
-  | [r] <- sub, [sep] <- toList envSep -> getSub sep (bounds r)
-  | otherwise -> error "Multiple ranges and multibyte separators not implemented yet"
-
-{-# INLINE subrec #-}
-subrec :: (StringLike s) => Env s -> Subrec -> Lens' s s
-subrec Env{..} sub = if
-  | [] <- sub -> id
-  | [r] <- sub, [sep] <- toList envSep -> subLens sep (bounds r)
-  | otherwise -> error "Multiple ranges and multibyte separators not implemented yet"
---
--- {-# INLINE subrec' #-}
--- subrec' Env{..} (start, end) = case toList envSep of
---   [c] -> c_subrec c (start, end)
---     -- | start == 0, end == 0 -> takeWhile (/= c)
---   _ -> envIntercalate . take (end - start) . drop start . envSplit
-
 bounds :: (Num c, Integral a, Bounded c) => (Maybe a, Maybe a) -> (c, c)
 bounds = (maybe 0 fromIntegral *** maybe maxBound fromIntegral)
 
@@ -78,11 +73,6 @@ bounds = (maybe 0 fromIntegral *** maybe maxBound fromIntegral)
 --   i1 = {-# SCC i1 #-} if start > n then maxBound else (is !! (start - 1)) + 1
 --   in {-# SCC sliceTakeDrop #-}
 --   (if end >= n then id else B.take $ (is !! end) - i1) $ (if start == 0 then id else B.drop $ i1) s
-
-{-# INLINE getKeyValue #-}
-getKeyValue :: (StringLike s) => Env s -> Subrec -> Subrec -> s -> (s, s)
-getKeyValue env@Env{..} sub1 sub2 = {-# SCC getKeyValue #-} if
-  | otherwise -> getSubrec env sub1 &&& getSubrec env sub2
 
 splitElemEx :: (IsSequence seq, Eq (Element seq)) => Element seq -> seq -> [seq]
 splitElemEx x = splitWhen (== x)

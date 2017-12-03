@@ -27,6 +27,9 @@ import ByteString.StrictBuilder (builderBytes, builderLength, bytes)
 linesC :: Monad m => Conduit ByteString m LineBS
 linesC = mapOutput LineString CB.lines
 
+mapLinesC :: (Functor f, Monad m) => f (ConduitM a ByteString m ()) -> f (ConduitM a LineBS m ())
+mapLinesC = map (.| linesC)
+
 joinLinesC :: Monad m => Conduit LineBS m ByteString
 joinLinesC = awaitForever (\s -> yield (unLineString s) >> yield "\n") .| bsBuilderC (32*1024)
 
@@ -83,48 +86,55 @@ inputFiles Env{..} = case optsInputs envOpts of
   []     -> [""]
   inputs -> replaceElem "-" "" inputs
 
+-- | Yield all input lines, adding newline to the end of each.
+-- yieldManyWithEOL :: (Element mono ~ LineBS, MonoFoldable mono, Monad m) =>
+  -- mono -> ConduitM i ByteString m ()
+-- yieldManyWithEOL    :: (Element a ~ LineString ByteString, MonoFoldable a, Monad m) =>
+     -- a -> ConduitM i ByteString m ()
+
+yieldManyWithEOL :: (Element mono ~ LineBS, Monad m, MonoFoldable mono) =>
+     mono -> ConduitM i ByteString m ()
+yieldManyWithEOL = mapM_ (yield . unLineStringEOL)
+
+-- | Apply given function to the header of the first input and sources for all input bodies.
+-- Header will be either Nothing or Just string with newline.
 withInputSourcesH :: (MonadResource m, MonadTrans t, Monad (t m), StringLike s) =>
-  Env s -> (Maybe s -> [Source m s] -> t m b) -> t m b
+  Env s -> ([(Maybe (LineString s), Source m s)] -> t m b) -> t m b
 withInputSourcesH env combine = if
   | optsHeader, (_:_) <- sources -> do
-    (unzip -> (sources', finalize), header:_) <- lift $
+    (unzip -> (sources', finalize), headers) <- lift $
+      -- take 1 line and return Source for the rest (not split by lines)
       unzip <$> mapM (($$+ lineAsciiC foldC) >=> _1 unwrapResumable) sources
-    x <- combine (maybeAddEOL header) sources'
+    let headerLine h = if null h then Nothing else Just (LineString h)
+    let headerLines = map headerLine headers
+    x <- combine $ zip headerLines sources'
     lift $ sequence_ finalize
     return x
-  | otherwise -> combine Nothing sources
+  | otherwise -> combine $ zip (repeat Nothing) sources
   where
   sources = inputSources env
   Opts{..} = envOpts env
 
--- withInputSources :: forall (m :: * -> *) b. MonadResource m =>
-  -- Env ByteString -> ConduitM ByteString ByteString m b -> ConduitM () ByteString m b
-withInputSources :: MonadResource m =>
-    Env ByteString
-    -> (ByteString -> ConduitM ByteString ByteString m b)
-    -> ConduitM () ByteString m b
-withInputSources env c = withInputSourcesH env $
-  \(Just header) sources -> yield header >> sequence_ sources .| (c header)
-
 withHeader :: MonadIO m =>
-  Env t -> Source m ByteString -> (Maybe ByteString -> ConduitM ByteString c m r) -> ConduitM () c m r
+  Env t -> Source m ByteString -> (Maybe LineBS -> ConduitM ByteString c m r) -> ConduitM () c m r
 withHeader Env{..} source f = if
   | optsHeader envOpts -> do
     ((source', finalize), header) <- lift $ (($$+ lineAsciiC foldC) >=> _1 unwrapResumable) source
-    x <- source' .| f (maybeAddEOL header)
+    x <- source' .| f (nonempty Nothing (Just . LineString) header)
     lift $ finalize
     return x
   | otherwise -> source .| f Nothing
 
 data JoinOpts rec sub out = JoinOpts {
   joinOuterLeft, joinOuterRight :: Bool,
-  joinKey, joinValue :: rec -> sub,
+  joinKey, joinValue :: LineString rec -> LineString sub,
 --  joinKeyValue :: rec -> (sub,sub),
-  joinCombine :: [sub] -> out
+  joinCombine :: [LineString sub] -> out
   }
 
 -- | Join multiple ordered sources (currenly works only for two sources)
-joinCE :: (Ord sub, Monoid sub, Monad m) => JoinOpts rec sub out -> [Source m [rec]] -> Source m (Seq out)
+joinCE :: (Ord sub, Monoid sub, Monad m) =>
+  JoinOpts rec sub out -> [Source m [LineString rec]] -> Source m (Seq out)
 joinCE jopts@JoinOpts{..} [ConduitM !left0, ConduitM !right0] = ConduitM $ \rest -> let
 -- joinCE jopts@JoinOpts{..} inputs = ConduitM $ \rest -> let
   go (HaveOutput src1 close1 chunk1) (HaveOutput src2 close2 chunk2) = let
@@ -193,11 +203,17 @@ mergeSourcesOn key = mergeResumable . fmap newResumableSource . toList
 
 -- * Transformers
 
-linesCE :: Monad m => Conduit ByteString m [ByteString]
-linesCE = lineChunksC .| mapC BC.lines
+linesBS :: ByteString -> [LineBS]
+linesBS = map LineString . BC.lines
 
-unlinesCE :: (Monad m, MonoFoldable mono, Element mono ~ ByteString) => Conduit mono m ByteString
-unlinesCE = mapC (BC.unlines . toList)
+unlinesBS :: [LineBS] -> ByteString
+unlinesBS = BC.unlines . map unLineString
+
+linesCE :: Monad m => Conduit ByteString m [LineBS]
+linesCE = mapOutput linesBS lineChunksC
+
+unlinesCE :: (Monad m, MonoFoldable mono, Element mono ~ LineBS) => Conduit mono m ByteString
+unlinesCE = mapC (unlinesBS . toList)
 
 lineChunksC :: Monad m => Conduit ByteString m ByteString
 lineChunksC = await >>= maybe (return ()) go
@@ -226,16 +242,22 @@ sinkMultiFile :: (MonadIO m) => Sink (FilePath, ByteString) m ()
 sinkMultiFile = mapM_C $ \(file, line) ->  liftIO $
   withBinaryFile file AppendMode (`BC.hPutStrLn` line)
 
-splitCE :: (MonadIO m, MonoFoldable mono, Element mono ~ ByteString) =>
-  (ByteString -> FilePath) -> Bool -> Bool -> Maybe ByteString -> Sink mono m ()
-splitCE toFile mkdir compress mheader =
-   foldlCE (\m rec -> insertWith (flip (++)) (toFile rec) (builder rec) m) (asHashMap mempty) >>=
-   liftIO . mapM_ writeRecs . mapToList
+splitCE :: (MonadIO m, MonoFoldable mono, Element mono ~ LineBS) =>
+  (LineBS -> FilePath) -- ^ function to produce filepath
+  -> Bool -- ^ run mkdir for each file?
+  -> Bool -- ^ gzip output files?
+  -> Maybe LineBS -- ^ Header for each output file
+  -> Sink mono m ()
+splitCE toFile mkdir compress mheader = do
+  out <- foldlCE
+    (\m rec -> insertWith (flip (++)) (toFile rec) (builder $ unLineString rec) m)
+    (asHashMap mempty)
+  liftIO $ mapM_ writeRecs $ mapToList out
   where
   builder rec = Builder.byteString rec ++ Builder.asciiChar '\n'
   writeRecs = case mheader of
     Nothing -> \(file, b) -> writeBuilder file b
-    Just header -> \(file, b) -> writeBuilder file (builder header ++ b)
+    Just (LineString header) -> \(file, b) -> writeBuilder file (builder (header ++ "\n") ++ b)
   writeBuilder file b = newdir file >> BL.writeFile file (whenC compress gzip $ Builder.toLazyByteString b)
   gzip = GZ.compressWith $ GZ.defaultCompressParams { GZ.compressLevel = GZ.bestSpeed }
 
@@ -279,7 +301,8 @@ splitCE toFile mkdir compress mheader =
 -- | Join two ordered lists; return joined output and leftovers
 joinLists :: forall rec sub out. (Ord sub, Monoid sub) =>
   -- JoinOpts rec sub out -> [(sub,sub)] -> [(sub,sub)] -> (Seq out, ([(sub,sub)], [(sub,sub)]))
-  JoinOpts rec sub out -> [rec] -> [rec] -> (Seq out, ([rec], [rec]))
+  JoinOpts rec sub out -> [LineString rec] -> [LineString rec]
+  -> (Seq out, ([LineString rec], [LineString rec]))
 joinLists JoinOpts{..} xs ys = go xs ys (mempty :: Seq _)
   where
   go [] rest = (, ([], rest))
@@ -368,3 +391,28 @@ columnsSource ColumnParams{..} source = (source $$+ headC) >>= \case
         | otherwise -> getIndices indices
       allCols = readTsvBs colHeader
       in return (ColumnInfo{..}, resum $=+ mapC (filterCols . readTsvBs . unLineString))
+
+catWithHeaderC :: Monad m
+  => Env ByteString -> [(Maybe LineBS, Source m ByteString)] -> Source m ByteString
+catWithHeaderC env@Env{..} headersSources = case optsSubrec envOpts of
+  [] -> do
+    yieldManyWithEOL header1
+    sequence_ sources -- bodies not split in lines
+  _ -> do
+    yieldManyWithEOL $ preprocessHeader env header1
+    sequence_ [preprocessC env h (s .| linesC) | (h, s) <- headersSources] .| joinLinesC
+  where
+  (headers, sources) = unzip headersSources
+  header1 = case headers of
+    [] -> Nothing
+    (h1:_) -> h1
+  -- let combine = if null optsSubrec envOpts then
+
+preprocessHeader :: Functor f => Env ByteString -> f LineBS -> f LineBS
+preprocessHeader env@Env{..} mheader = cut <$> mheader
+  where
+  cut = getSubrec env (optsSubrec envOpts)
+
+preprocessC env@Env{..} mheader source = mapOutput cut source
+  where
+  cut = getSubrec env (optsSubrec envOpts)

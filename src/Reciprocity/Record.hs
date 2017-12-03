@@ -1,10 +1,11 @@
-module Reciprocity.Record where
+module Reciprocity.Record (
+  module Reciprocity.Record,
+  module Reciprocity.Base
+  ) where
 
 import ReciprocityPrelude
--- import Reciprocity.Base
-
-newtype LineString s = LineString { unLineString :: s } deriving (Show, Eq, Ord)
-type LineBS = LineString ByteString
+import Reciprocity.Base
+import Reciprocity.Internal
 
 splitTsvLine :: (Eq (Element b), IsSequence b, IsString b) => LineString b -> [b]
 splitTsvLine = readTsv . unLineString
@@ -12,13 +13,16 @@ splitTsvLine = readTsv . unLineString
 joinTsvFields :: (IsSequence b, IsString b) => [b] -> LineString b
 joinTsvFields = LineString . showTsv
 
+-- | strip 'LineString' newtype and append EOL char
+unLineStringEOL :: LineBS -> ByteString
+unLineStringEOL = (`snoc` c2w '\n') . unLineString
 -- Conduit utils
 
 maybeAddEOL :: ByteString -> Maybe ByteString
-maybeAddEOL = nonempty Nothing (Just . (`snoc` 10))
+maybeAddEOL = nonempty Nothing (Just . (`snoc` c2w '\n'))
 
 breakAfterEOL :: ByteString -> (ByteString, ByteString)
-breakAfterEOL = second uncons . break (== 10) >>> \(x, m) -> maybe (x, "") (first (snoc x)) m
+breakAfterEOL = second uncons . break (== c2w '\n') >>> \(x, m) -> maybe (x, "") (first (snoc x)) m
 
 (.!) :: (b -> c) -> (a -> b) -> a -> c
 (.!) = (.) . ($!)
@@ -34,3 +38,35 @@ getIndices ks = go (\_ -> []) $ reverse diffs
   diffs = take 1 ks ++ map (subtract 1) (zipWith (-) (drop 1 ks) ks)
   go f [] = f
   go f (i:is) = go ((\(x:xs) -> x : f xs) . drop i) is
+
+{-# INLINE getSubrec #-}
+getSubrec :: (StringLike s) => Env s -> Subrec -> LineString s -> LineString s
+getSubrec Env{..} sub = if
+  | [] <- sub -> id
+  | [r] <- sub, [sep] <- toList envSep -> LineString . getSub sep (bounds r) . unLineString
+  | otherwise -> error "Multiple ranges and multibyte separators not implemented yet"
+
+{-# INLINE subrec #-}
+subrec :: (StringLike s) => Env s -> Subrec -> Lens' LineBS LineBS
+subrec Env{..} sub = if
+  -- | [] <- sub -> id
+  | [r] <- sub, [sep] <- toList envSep -> subLens sep (bounds r) -- . iso LineString unLineString
+  -- | [r] <- sub, [sep] <- toList envSep -> iso unLineString LineString . subLens sep (bounds r)
+  | otherwise -> error "Multiple ranges and multibyte separators not implemented yet"
+--
+-- {-# INLINE subrec' #-}
+-- subrec' Env{..} (start, end) = case toList envSep of
+--   [c] -> c_subrec c (start, end)
+--     -- | start == 0, end == 0 -> takeWhile (/= c)
+--   _ -> envIntercalate . take (end - start) . drop start . envSplit
+
+{-# INLINE subLens #-}
+-- subLens :: Word8 -> (Int, Int) -> Lens' B.ByteString B.ByteString
+subLens :: Word8 -> (Int, Int) -> Lens' LineBS LineBS
+subLens sep bounds = \f (LineString str) -> let sub = getSub sep bounds str in
+  LineString . (\sub' -> replaceSub sub sub' str) . unLineString <$> f (LineString sub)
+
+{-# INLINE getKeyValue #-}
+getKeyValue :: Env ByteString -> Subrec -> Subrec -> LineBS -> (LineBS, LineBS)
+getKeyValue env@Env{..} sub1 sub2 = {-# SCC getKeyValue #-} if
+  | otherwise -> getSubrec env sub1 &&& getSubrec env sub2

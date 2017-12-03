@@ -51,11 +51,3 @@ splitAfter sep k str = (sub1, sub2)
 replaceSub :: ByteString -> ByteString -> ByteString -> ByteString
 replaceSub (B.PS _ subOff subLen) newSub str@(B.PS _ off _) =
   B.take (subOff - off) str ++ newSub ++ B.drop (subOff - off + subLen) str
-
-{-# INLINE subLens #-}
-subLens :: Word8 -> (Int, Int) -> Lens' B.ByteString B.ByteString
-subLens sep bounds = \f str -> let sub = getSub sep bounds str in
-  (\sub' -> replaceSub sub sub' str) <$> f sub
-
--- uappend :: (ByteString, ByteString) -> ByteString
--- uappend = uncurry (++)

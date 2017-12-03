@@ -18,18 +18,19 @@ import Data.Text          (replace)
 
 -- * Cat
 
-data CmdCat = CmdCat deriving (Show)
+data CmdCat = CmdCat {} deriving (Show)
 instance IsCommand CmdCat where
 
   commandInfo = CmdInfo {
     cmdDesc = "Concatenate inputs",
-    cmdParser = pure CmdCat
+    cmdParser = do
+      pure CmdCat
   }
 
   runCommand _ = do
     env <- ask
-    liftIO $ runConduitRes $ withInputSourcesH env $
-      \header sources -> (yieldMany header >> sequence_ sources) .| stdoutC
+    -- liftIO $ runConduitRes $ withInputSourcesH env $ \hsources -> catWithHeaderC env hsources .| stdoutC
+    liftIO $ runConduitRes $ withInputSourcesH env $ \hsources -> catWithHeaderC env hsources .| stdoutC
 
 -- * Merge
 
@@ -44,10 +45,10 @@ instance IsCommand CmdMerge where
     }
   runCommand CmdMerge{..} = do
     env <- ask
-    let merge = mergeSourcesOn $ getSubrec env mergeKey . unLineString
-    runConduitRes $ withInputSourcesH env $
-      \header sources -> (yieldMany (LineString <$> header) >> merge (map (.| linesC) sources)) .|
-        joinLinesC .| stdoutC
+    let merge = mergeSourcesOn $ getSubrec env mergeKey
+    runConduitRes $ withInputSourcesH env $ \headersSources -> let
+      ((mheader:_), sources) = unzip headersSources in
+      (yieldMany mheader >> merge (mapLinesC sources)) .| joinLinesC .| stdoutC
     where
 
 -- * Join
@@ -77,6 +78,7 @@ instance IsCommand CmdJoin where
     runConduitRes $ joinCE (joinOpts env) [s1, s2] .| unlinesCE .| stdoutC
     where
     {-# INLINE joinOpts #-}
+    joinOpts :: Env ByteString -> JoinOpts ByteString ByteString _
     joinOpts env@Env{..} = JoinOpts {
       joinOuterLeft = cmdJoinOuterLeft,
       joinOuterRight = cmdJoinOuterRight,
@@ -85,7 +87,7 @@ instance IsCommand CmdJoin where
       -- joinKeyValue = getKeyValue env cmdJoinKey cmdJoinValue,
       joinCombine = case cmdJoinKey of
         [] -> headEx
-        _  -> \[k,v1,v2] -> k ++ envSep ++ v1 ++ envSep ++ v2
+        _  -> \(map unLineString -> [k,v1,v2]) -> LineString $ k ++ envSep ++ v1 ++ envSep ++ v2
       }
 
 -- * Diff
@@ -110,7 +112,7 @@ instance IsCommand CmdDiff where
       | length vals1 /= length vals2 -> [joinTsvFields $ "0": take 1 vals1]
       | otherwise -> [
         joinTsvFields [encodeUtf8 (tshow ix), val1, val2]
-        | (ix, val1, val2) <- zip3 [0..] vals1 vals2
+        | (ix, val1, val2) <- zip3 [0 :: Int ..] vals1 vals2
         , val1 /= val2
       ]
       where
@@ -149,12 +151,13 @@ instance IsCommand CmdSplit where
           \h -> linesCE .| splitCE (toFile getKey file) splitMkdir splitCompress h
     sequence_ $ zipWith split (inputFiles env) (inputSources env)
     where
-    toFile fk inFile = \rec -> unpack $ replace "{s}" (value rec) template
+    toFile fk inFile = \rec -> unpack $ setValue $ value rec
       where
+      setValue val = replace "{s}" val template
       template = replace "{filename}" (pack $ takeFileName inFile) splitTemplate
       value = if
-        | splitPartition -> tshow . bucket (fromIntegral splitBuckets) . fk
-        | otherwise -> omap (\c -> if isSpace c then '.' else c) . decodeUtf8 . fk
+        | splitPartition -> tshow . bucket (fromIntegral splitBuckets) . unLineString . fk
+        | otherwise -> omap (\c -> if isSpace c then '.' else c) . decodeUtf8 . unLineString . fk
     -- let (base, ext) = splitExtension inFile in base +? BC.unpack (fk rec) +? ext
     -- x +? y = if null x then y else if null y then x else x ++ "." ++ y
 
@@ -182,7 +185,11 @@ instance IsCommand CmdReplace where
     let sub = subrec env replaceSubrec
     dict <- runConduitRes $ sourceFile replaceDictFile .| linesCE .| foldlCE
       (\m s -> uncurry insertMap (getKeyValue env replaceDictKey replaceDictValue s) m)
-      (mempty :: HashMap ByteString _)
-    let replaceC =  (.| linesCE .| dictReplaceCE replaceDelete dict sub .| unlinesCE)
-    runConduitRes $ withInputSourcesH env $
-      \header sources -> (yieldMany header >> mapM_ replaceC sources) .| stdoutC
+      (asHashMap mempty)
+    runConduitRes $ withInputSourcesH env $ \headersSources -> let
+      ((mheader:_), sources) = unzip headersSources in
+      (do
+        yieldManyWithEOL mheader
+        sequence_ [ s .| linesCE .| dictReplaceCE replaceDelete dict sub .| unlinesCE
+                  | s <- sources]
+      ) .| stdoutC
