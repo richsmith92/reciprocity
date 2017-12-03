@@ -31,7 +31,7 @@ optsParser = do
   optsSep <- textOpt id (short 'd' ++ help "Delimiter (default is TAB)" ++ value "\t")
   optsHeader <- not <$> switch (short 'H' ++ long "headerless" ++ help "No header line in inputs")
   optsInputs <- many (strArgument (metavar "INPUT"))
-  optsSubrec <- subrecOpt (value [] ++ long "subrec" ++ short 'c' ++ help "Take subrecord of each input")
+  optsSubrec <- subrecOpt (long "subrec" ++ short 'c' ++ help "Take subrecord of each input")
   return (Opts{..})
 
 fileOpt :: OptParser FilePath
@@ -43,17 +43,20 @@ textOpt parse = option (parse . pack <$> str)
 natOpt :: OptParser Natural
 natOpt mods = option auto (mods ++ metavar "N")
 
-subrecOpt :: OptParser Subrec
-subrecOpt mods = textOpt (parse . splitSeq "-") (mods ++ metavar "SUBREC")
+subrecOpt mods = many $ fieldRangeOpt mods
+
+-- fieldRangeOpt :: OptParser Subrec
+fieldRangeOpt :: OptParser FieldRange
+fieldRangeOpt mods = textOpt (parse . splitSeq "-") (mods ++ metavar "SUBREC")
   where
-  parse :: [String] -> Subrec
+  parse :: [String] -> FieldRange
   parse = \case
-    [i] ->     [(field i,field i)]
-    ["",""] -> []
-    ["", i] -> [(Nothing, field i)]
-    [i, ""] -> [(field i, Nothing)]
-    [i, j] ->  [(field i, field j)]
-    _ -> error "subrecOpt: unrecognized format"
+    [i] ->     (field i,field i)
+    -- ["",""] -> []
+    ["", i] -> (Nothing, field i)
+    [i, ""] -> (field i, Nothing)
+    [i, j] ->  (field i, field j)
+    _ -> error "fieldRangeOpt: unrecognized format"
   field = Just . pred . read
 
 keyOpt :: Parser Subrec

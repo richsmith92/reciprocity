@@ -41,10 +41,13 @@ getIndices ks = go (\_ -> []) $ reverse diffs
 
 {-# INLINE getSubrec #-}
 getSubrec :: (StringLike s) => Env s -> Subrec -> LineString s -> LineString s
-getSubrec Env{..} sub = if
-  | [] <- sub -> id
-  | [r] <- sub, [sep] <- toList envSep -> LineString . getSub sep (bounds r) . unLineString
-  | otherwise -> error "Multiple ranges and multibyte separators not implemented yet"
+getSubrec _env@Env{..} ranges = if
+  | [] <- ranges -> id
+  | [r] <- ranges, [sep] <- toList envSep -> LineString . getSub sep (bounds r) . unLineString
+  | [sep] <- toList envSep -> LineString . getSubs sep . unLineString
+  | otherwise -> error "Multibyte separators not implemented yet"
+  where
+  getSubs sep s = intercalate envSep $ [getSub sep (bounds r) s | r <- ranges]
 
 {-# INLINE subrec #-}
 subrec :: (StringLike s) => Env s -> Subrec -> Lens' LineBS LineBS

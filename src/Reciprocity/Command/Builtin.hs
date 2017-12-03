@@ -173,9 +173,11 @@ instance IsCommand CmdReplace where
     cmdDesc = "Replace subrecord using dictionary",
     cmdParser = do
       replaceDictFile <- fileOpt $ long "dict" ++ help "Dictionary file"
-      replaceDictKey <- subrecOpt (long "key" ++ short 'k' ++ help "Dict key subrecord" ++ value (singleField 0))
-      replaceDictValue <- subrecOpt (long "val" ++ help "Dict value subrecord" ++ value (singleField 1))
-      replaceSubrec <- subrecOpt $ long "sub" ++ help "Subrecord to replace" ++ value []
+      replaceDictKey <- subrecOpt $ long "key" ++ short 'k' ++ help "Dict key subrecord"
+        -- ++ value (singleField 0))
+      replaceDictValue <- subrecOpt $ long "val" ++ help "Dict value subrecord"
+        -- ++ value (singleField 1))
+      replaceSubrec <- subrecOpt $ long "sub" ++ help "Subrecord to replace"
       replaceDelete <- switch $ long "delete" ++ short 'd' ++ help "Delete lines with subrecords not in dictionary"
       return CmdReplace{..}
     }

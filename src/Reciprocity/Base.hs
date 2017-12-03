@@ -44,7 +44,8 @@ instance Wrapped (LineString s) where
   {-# INLINE _Wrapped' #-}
 instance (Hashable a) => Hashable (LineString a)
 
-type Subrec = [Pair (Maybe Natural)]
+type FieldRange = Pair (Maybe Natural)
+type Subrec = [FieldRange]
 
 singleField :: Natural -> Subrec
 singleField i = [dupe (Just i)]
