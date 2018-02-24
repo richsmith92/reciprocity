@@ -54,12 +54,6 @@ showTsvLines = concatMap showTsvLn
 readTsvBs :: ByteString -> [ByteString]
 readTsvBs = splitElem (c2w '\t')
 
-terr :: Text -> IO ()
-terr = err . unpack
-
-terrLn :: Text -> IO ()
-terrLn = errLn . unpack
-
 -- | Wrapper for 'ofoldl\'' with more convenient type
 foldEndo' :: (MonoFoldable t) => (Element t -> b -> b) -> t -> b -> b
 foldEndo' f = flip $ ofoldl' (flip f)
