@@ -6,7 +6,7 @@
 
 module ReciprocityPrelude (module ReciprocityPrelude, module R) where
 
-import ClassyPrelude.Conduit as R hiding ((<.>))
+import ClassyPrelude.Conduit as R hiding ((<.>), withBinaryFile)
 import Control.Arrow         as R ((<<<), (>>>))
 import Control.Lens          as R hiding
   (Index, argument, cons, enum, index, snoc, uncons, unsnoc, both, noneOf
@@ -20,7 +20,8 @@ import           Data.ByteString.Internal as R (c2w, w2c)
 import Data.Data     as R (Data)
 import Data.Function as R (fix, (&))
 import Data.List     as R (foldl1, foldr1, nub)
-import Extra         as R (dupe, groupOn, groupSort, groupSortOn)
+import Data.List.Extra         as R (groupOn, groupSort, groupSortOn)
+import Data.Tuple.Extra as R (dupe, both)
 import Data.Monoid as R hiding ((<>))
 
 import Numeric.Natural as R
@@ -28,8 +29,9 @@ import System.Directory as R
   (createDirectoryIfMissing, doesFileExist, doesDirectoryExist
   , getHomeDirectory, removeFile, getHomeDirectory)
 import System.FilePath  as R
-  ( dropExtension, splitExtension, takeBaseName, takeDirectory, splitDirectories
-  , takeExtension, takeFileName, joinPath, hasTrailingPathSeparator)
+  ( dropExtension, splitExtension, replaceExtension, takeExtension
+  , takeBaseName, takeDirectory, splitDirectories
+  , takeFileName, joinPath, hasTrailingPathSeparator)
 
 read :: (Read a, Textual s) => s -> a
 read s = fromMaybe (error $ "read: " ++ unpack s) $ readMay s

@@ -43,6 +43,7 @@ textOpt parse = option (parse . pack <$> str)
 natOpt :: OptParser Natural
 natOpt mods = option auto (mods ++ metavar "N")
 
+subrecOpt :: Mod OptionFields FieldRange -> Parser [FieldRange]
 subrecOpt mods = many $ fieldRangeOpt mods
 
 -- fieldRangeOpt :: OptParser Subrec

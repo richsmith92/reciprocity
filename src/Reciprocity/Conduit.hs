@@ -15,68 +15,67 @@ import           System.IO             (IOMode (..), withBinaryFile)
 -- import qualified Data.Vector as V
 import           Data.These      (These (..))
 
-import           Data.Conduit.Internal (ConduitM (..), Pipe (..))
+import           Data.Conduit.Internal (ConduitT (..), Pipe (..))
 import qualified Data.Conduit.Internal as CI
 import           Codec.Archive.Zip
 import qualified ByteString.TreeBuilder as Builder
 import qualified Codec.Compression.GZip as GZ
-import Path.IO (resolveFile')
-import Path (setFileExtension, filename)
 import ByteString.StrictBuilder (builderBytes, builderLength, bytes)
 
-linesC :: Monad m => Conduit ByteString m LineBS
+linesC :: Monad m => ConduitT ByteString LineBS m ()
 linesC = mapOutput LineString CB.lines
 
-mapLinesC :: (Functor f, Monad m) => f (ConduitM a ByteString m ()) -> f (ConduitM a LineBS m ())
+mapLinesC :: (Functor f, Monad m) => f (ConduitT a ByteString m ()) -> f (ConduitT a LineBS m ())
 mapLinesC = map (.| linesC)
 
-joinLinesC :: Monad m => Conduit LineBS m ByteString
+joinLinesC :: Monad m => ConduitT LineBS ByteString m ()
 joinLinesC = awaitForever (\s -> yield (unLineString s) >> yield "\n") .| bsBuilderC (32*1024)
 
-unlinesBSC :: Monad m => Conduit LineBS m ByteString
+unlinesBSC :: Monad m => ConduitT LineBS ByteString m ()
 unlinesBSC = mapC ((`snoc` c2w '\n') . unLineString)
 
-useHeader :: Monad m => (o -> ConduitM o o m ()) -> ConduitM o o m ()
+useHeader :: Monad m => (o -> ConduitT o o m ()) -> ConduitT o o m ()
 useHeader c = awaitJust $ \h -> yield h >> c h
 
-dropHeader :: Monad m => Conduit LineBS m LineBS
+dropHeader :: Monad m => ConduitT LineBS LineBS m ()
 dropHeader = do
   awaitJust $ \_h -> return () -- when (not $ "id" `isPrefixOf` unLineString h) (leftover h)
   awaitForever yield
 
--- concatWithHeaders :: Monad m => [Conduit LineBS m LineBS] -> Conduit LineBS m LineBS
-concatWithHeaders :: Monad m => [ConduitM a LineBS m ()] -> ConduitM a LineBS m ()
-concatWithHeaders sources = forM_ (zip [0..] sources) $ \case
-  (0, s) -> s
-  (_, s) -> s .| dropHeader
+concatWithHeaders :: Monad m => [ConduitT a LineBS m ()] -> ConduitT a LineBS m ()
+concatWithHeaders sources = sequence_ $ case uncons sources of
+  Nothing -> []
+  Just (source1, sources') -> source1 : map (.| dropHeader) sources'
 
-produceZip :: Bool -> FilePath -> Source (ResourceT IO) ByteString -> IO [Text]
+produceZip :: Bool -> FilePath -> ConduitT () ByteString (ResourceT IO) () -> IO [Text]
 produceZip overwrite outFile source = do
   exists <- doesFileExist outFile
   if | exists && not overwrite ->
         return [pack $ "Output file exists, skipping: " ++ outFile]
      | otherwise -> do
         unless exists $ createDirectoryIfMissing True (takeDirectory outFile)
-        path <- resolveFile' outFile
-        entryName <- setFileExtension "txt" $ filename path
-        entrySel <- mkEntrySelector entryName
-        createArchive path $ sinkEntry Deflate source entrySel
+        -- path <- resolveFile' outFile
+        -- entryName <- setFileExtension "txt" $ filename path
+        entrySel <- mkEntrySelector $ takeBaseName outFile ++ ".txt"
+        createArchive outFile $ sinkEntry Deflate source entrySel
         return []
 
 -- * Producers
 
-inputC :: MonadResource m => FilePath -> Source m ByteString
+type MonadRec m = (MonadResource m, PrimMonad m, MonadThrow m)
+
+inputC :: (MonadRec m) => FilePath -> ConduitT () ByteString m ()
 inputC inFile = case takeExtension inFile of
   ".zip" -> join $ liftIO $ do
-    path <- resolveFile' inFile
-    withArchive path $ do
+    -- path <- resolveFile' inFile
+    withArchive inFile $ do
       entries <- keys <$> getEntries
       if | [entry] <- entries -> getEntrySource entry
          | otherwise -> error $ "More than one entry in zip file: " ++ inFile
-  ".gz" -> sourceFile inFile $= ungzip
+  ".gz" -> sourceFile inFile .| ungzip
   _ -> sourceFile inFile
 
-inputSources :: (MonadResource m, s ~ ByteString) => Env s -> [Source m s]
+inputSources :: (MonadRec m, s ~ ByteString) => Env s -> [ConduitT () s m ()]
 inputSources Env{..} = case optsInputs envOpts of
   []     -> [stdinC]
   inputs -> map inputC inputs
@@ -88,41 +87,38 @@ inputFiles Env{..} = case optsInputs envOpts of
 
 -- | Yield all input lines, adding newline to the end of each.
 -- yieldManyWithEOL :: (Element mono ~ LineBS, MonoFoldable mono, Monad m) =>
-  -- mono -> ConduitM i ByteString m ()
+  -- mono -> ConduitT i ByteString m ()
 -- yieldManyWithEOL    :: (Element a ~ LineString ByteString, MonoFoldable a, Monad m) =>
-     -- a -> ConduitM i ByteString m ()
+     -- a -> ConduitT i ByteString m ()
 
 yieldManyWithEOL :: (Element mono ~ LineBS, Monad m, MonoFoldable mono) =>
-     mono -> ConduitM i ByteString m ()
+     mono -> ConduitT i ByteString m ()
 yieldManyWithEOL = mapM_ (yield . unLineStringEOL)
 
 -- | Apply given function to the header of the first input and sources for all input bodies.
 -- Header will be either Nothing or Just string with newline.
-withInputSourcesH :: (MonadResource m, MonadTrans t, Monad (t m), StringLike s) =>
-  Env s -> ([(Maybe (LineString s), Source m s)] -> t m b) -> t m b
+withInputSourcesH :: (MonadRec m, MonadTrans t, Monad (t m), StringLike s) =>
+  Env s -> ([(Maybe (LineString s), ConduitT () s m ())] -> t m b) -> t m b
 withInputSourcesH env combine = if
   | optsHeader, (_:_) <- sources -> do
-    (unzip -> (sources', finalize), headers) <- lift $
+    (sources', headers) <- unzip <.> lift $
       -- take 1 line and return Source for the rest (not split by lines)
-      unzip <$> mapM (($$+ lineAsciiC foldC) >=> _1 unwrapResumable) sources
+      forM sources $ \source -> first unsealConduitT <$> (source $$+ lineAsciiC foldC)
     let headerLine h = if null h then Nothing else Just (LineString h)
     let headerLines = map headerLine headers
-    x <- combine $ zip headerLines sources'
-    lift $ sequence_ finalize
-    return x
+    combine $ zip headerLines sources'
   | otherwise -> combine $ zip (repeat Nothing) sources
   where
   sources = inputSources env
   Opts{..} = envOpts env
 
-withHeader :: MonadIO m =>
-  Env t -> Source m ByteString -> (Maybe LineBS -> ConduitM ByteString c m r) -> ConduitM () c m r
+withHeader :: MonadIO m
+  => Env t -> ConduitT () ByteString m ()
+  -> (Maybe LineBS -> ConduitT ByteString c m r) -> ConduitT () c m r
 withHeader Env{..} source f = if
   | optsHeader envOpts -> do
-    ((source', finalize), header) <- lift $ (($$+ lineAsciiC foldC) >=> _1 unwrapResumable) source
-    x <- source' .| f (nonempty Nothing (Just . LineString) header)
-    lift $ finalize
-    return x
+    (source', header) <- lift $ first unsealConduitT <$> (source $$+ lineAsciiC foldC)
+    source' .| f (nonempty Nothing (Just . LineString) header)
   | otherwise -> source .| f Nothing
 
 data JoinOpts rec sub out = JoinOpts {
@@ -133,15 +129,17 @@ data JoinOpts rec sub out = JoinOpts {
   }
 
 -- | Join multiple ordered sources (currenly works only for two sources)
-joinCE :: (Ord sub, Monoid sub, Monad m) =>
-  JoinOpts rec sub out -> [Source m [LineString rec]] -> Source m (Seq out)
-joinCE jopts@JoinOpts{..} [ConduitM !left0, ConduitM !right0] = ConduitM $ \rest -> let
--- joinCE jopts@JoinOpts{..} inputs = ConduitM $ \rest -> let
-  go (HaveOutput src1 close1 chunk1) (HaveOutput src2 close2 chunk2) = let
+joinCE :: (Ord sub, Monoid sub, Monad m)
+  => JoinOpts rec sub out
+  -> [ConduitT () [LineString rec] m ()]
+  -> ConduitT () (Seq out) m ()
+joinCE jopts@JoinOpts{..} [ConduitT !left0, ConduitT !right0] = ConduitT $ \rest -> let
+-- joinCE jopts@JoinOpts{..} inputs = ConduitT $ \rest -> let
+  go (HaveOutput src1 chunk1) (HaveOutput src2 chunk2) = let
     (out, (lo1, lo2)) = joinLists jopts chunk1 chunk2
     src1' = if null lo1 then src1 else CI.yield lo1 >> src1
     src2' = if null lo2 then src2 else CI.yield lo2 >> src2
-    in HaveOutput (go src1' src2') (close1 >> close2) out
+    in HaveOutput (go src1' src2') out
   go l (Done ()) = when joinOuterLeft (CI.mapOutput finishL l) >> rest ()
   go (Done ()) r = when joinOuterRight (CI.mapOutput finishR r) >> rest ()
   go (Leftover left ()) right = go left right
@@ -155,14 +153,14 @@ joinCE jopts@JoinOpts{..} [ConduitM !left0, ConduitM !right0] = ConduitM $ \rest
   where
   finishL = map (\rec -> joinCombine [joinKey rec, joinValue rec, mempty]) . fromList
   finishR = map (\rec -> joinCombine [joinKey rec, mempty, joinValue rec]) . fromList
-  -- [ConduitM !left0, ConduitM !right0] = map (mapOutput $ map joinKeyValue) inputs
+  -- [ConduitT !left0, ConduitT !right0] = map (mapOutput $ map joinKeyValue) inputs
   -- finishL = map (\(k,v) -> joinCombine [k, v, mempty]) . fromList
   -- finishR = map (\(k,v) -> joinCombine [k, mempty, v]) . fromList
 
 -- | TODO: somehow unite with `joinCE`
 mergeOrderedSources :: (Ord a, Monad m)
-  => Source m (a, b) -> Source m (a, b) -> Source m (a, These b b)
-mergeOrderedSources (ConduitM left0) (ConduitM right0) = ConduitM $ \rest -> let
+  => ConduitT () (a, b) m () -> ConduitT () (a, b) m () -> ConduitT () (a, These b b) m ()
+mergeOrderedSources (ConduitT left0) (ConduitT right0) = ConduitT $ \rest -> let
   go (Done ()) r = CI.mapOutput (second That) r >> rest ()
   go l (Done ()) = CI.mapOutput (second This) l >> rest ()
   go (Leftover left ()) right = go left right
@@ -172,11 +170,11 @@ mergeOrderedSources (ConduitM left0) (ConduitM right0) = ConduitM $ \rest -> let
   go (PipeM mx) (PipeM my) = PipeM (liftM2 go mx my)
   go (PipeM mx) y@HaveOutput{} = PipeM (liftM (\x -> go x y) mx)
   go x@HaveOutput{} (PipeM my) = PipeM (liftM (go x) my)
-  go xs@(HaveOutput srcx closex (k1, v1)) ys@(HaveOutput srcy closey (k2, v2)) =
+  go xs@(HaveOutput srcx (k1, v1)) ys@(HaveOutput srcy (k2, v2)) =
     case compare k1 k2 of
-      LT -> HaveOutput (go srcx ys) closex $ (k1, This v1)
-      GT -> HaveOutput (go xs srcy) closey $ (k2, That v2)
-      EQ -> HaveOutput (go srcx srcy) (closex >> closey) (k1, These v1 v2)
+      LT -> HaveOutput (go srcx ys) (k1, This v1)
+      GT -> HaveOutput (go xs srcy) (k2, That v2)
+      EQ -> HaveOutput (go srcx srcy) (k1, These v1 v2)
   in go (left0 Done) (right0 Done)
 
 -- | Merge multiple sorted sources into one sorted producer.
@@ -185,8 +183,8 @@ mergeOrderedSources (ConduitM left0) (ConduitM right0) = ConduitM $ \rest -> let
 -- mergeSources = mergeSourcesOn id
 
 -- | Merge multiple sorted sources into one sorted producer using specified sorting key.
-mergeSourcesOn :: (Ord b, Monad m) => (a -> b) -> [Source m a] -> Producer m a
-mergeSourcesOn key = mergeResumable . fmap newResumableSource . toList
+mergeSourcesOn :: (Ord b, Monad m) => (a -> b) -> [ConduitT () a m ()] -> ConduitT () a m ()
+mergeSourcesOn key = mergeResumable . fmap sealConduitT . toList
   where
     mergeResumable sources = do
         prefetchedSources <- lift $ traverse ($$++ await) sources
@@ -209,13 +207,13 @@ linesBS = map LineString . BC.lines
 unlinesBS :: [LineBS] -> ByteString
 unlinesBS = BC.unlines . map unLineString
 
-linesCE :: Monad m => Conduit ByteString m [LineBS]
+linesCE :: Monad m => ConduitT ByteString [LineBS] m ()
 linesCE = mapOutput linesBS lineChunksC
 
-unlinesCE :: (Monad m, MonoFoldable mono, Element mono ~ LineBS) => Conduit mono m ByteString
+unlinesCE :: (Monad m, MonoFoldable mono, Element mono ~ LineBS) => ConduitT mono ByteString m ()
 unlinesCE = mapC (unlinesBS . toList)
 
-lineChunksC :: Monad m => Conduit ByteString m ByteString
+lineChunksC :: Monad m => ConduitT ByteString ByteString m ()
 lineChunksC = await >>= maybe (return ()) go
   where
   go acc = if
@@ -224,21 +222,18 @@ lineChunksC = await >>= maybe (return ()) go
     where
     go' (this, next) = let acc' = acc ++ this in if null next then go acc' else yield acc' >> go next
 
--- replaceConduit :: HashMap ByteString ByteString -> Conduit ByteString m ByteString
--- dictReplaceCE :: (MapValue map ~ k, ContainerKey map ~ k, IsMap map, Functor f, Monad m) =>
-  -- Bool -> map -> ASetter s t k k -> Conduit (f s) m (f t)
 dictReplaceCE :: (MapValue map ~ k, ContainerKey map ~ k, IsMap map, Monad m) =>
-  Bool -> map -> ALens s b k k -> Conduit [s] m [b]
+  Bool -> map -> ALens s b k k -> ConduitT [s] [b] m ()
 dictReplaceCE delete dict subrec = if
   | delete -> mapC $ mapMaybe $ cloneLens subrec $ \x -> lookup x dict
   | otherwise -> mapCE $ cloneLens subrec %~ \x -> fromMaybe x $ lookup x dict
 
-subrecFilterCE :: (IsSequence b, Monad m) => (a -> Bool) -> Getting a (Element b) a -> Conduit b m b
+subrecFilterCE :: (IsSequence b, Monad m) => (a -> Bool) -> Getting a (Element b) a -> ConduitT b b m ()
 subrecFilterCE p subrec = mapC $ filter $ p . view subrec
 
 -- * Consumers
 
-sinkMultiFile :: (MonadIO m) => Sink (FilePath, ByteString) m ()
+sinkMultiFile :: (MonadIO m) => ConduitT (FilePath, ByteString) Void m ()
 sinkMultiFile = mapM_C $ \(file, line) ->  liftIO $
   withBinaryFile file AppendMode (`BC.hPutStrLn` line)
 
@@ -247,7 +242,7 @@ splitCE :: (MonadIO m, MonoFoldable mono, Element mono ~ LineBS) =>
   -> Bool -- ^ run mkdir for each file?
   -> Bool -- ^ gzip output files?
   -> Maybe LineBS -- ^ Header for each output file
-  -> Sink mono m ()
+  -> ConduitT mono Void m ()
 splitCE toFile mkdir compress mheader = do
   out <- foldlCE
     (\m rec -> insertWith (flip (++)) (toFile rec) (builder $ unLineString rec) m)
@@ -338,7 +333,7 @@ joinLists JoinOpts{..} xs ys = go xs ys (mempty :: Seq _)
   {-# INLINE append #-}
 
 
-awaitJust :: Monad m => (i -> ConduitM i o m ()) -> ConduitM i o m ()
+awaitJust :: Monad m => (i -> ConduitT i o m ()) -> ConduitT i o m ()
 awaitJust f = await >>= maybe (return ()) f
 
 bsBuilderC :: Monad m => Int -> ConduitM ByteString ByteString m ()
@@ -350,7 +345,7 @@ bsBuilderC size = loop mempty
       | otherwise -> loop accum')
 
 -- @cropRangeC f (a, b)@ filters a subset of values between @a@ and @b@ from ordered stream of values
-cropRangeC :: (Monad m, Ord b) => (a -> b) -> (Maybe b, Maybe b) -> Conduit a m a
+cropRangeC :: (Monad m, Ord b) => (a -> b) -> (Maybe b, Maybe b) -> ConduitT a a m ()
 cropRangeC f = \case
   (Nothing, Nothing) -> mapC id
   (Nothing, Just end) -> go2 end
@@ -374,16 +369,17 @@ data ColumnInfo col = ColumnInfo {
   colNames :: [col] -- ^ Filtered column names, to be zipped with values
   }
 
-withColumns :: Monad m => m (t, ResumableSource m a) -> (t -> Sink a m b) -> m b
+withColumns :: Monad m => m (t, SealedConduitT () a m ()) -> (t -> ConduitT a Void m b) -> m b
 withColumns colSource toSink = do
   (colInfo, resum) <- colSource
   resum $$+- toSink colInfo
 
 columnsSource :: Monad m
-  => ColumnParams ByteString -> Source m LineBS
-  -> m (ColumnInfo ByteString, ResumableSource m [ByteString]) -- ^ header line, column names and columns resumable source
+  => ColumnParams ByteString -> ConduitT () LineBS m ()
+  -> m (ColumnInfo ByteString, SealedConduitT () [ByteString] m ()) -- ^ header line, column names and columns resumable source
 columnsSource ColumnParams{..} source = (source $$+ headC) >>= \case
-    (resum, Nothing) -> closeResumableSource resum >>= error ("Empty file: " ++ colInputName)
+    (_resum, Nothing) -> -- closeResumableSource resum >>=
+      error ("Empty file: " ++ colInputName)
     (resum, Just (LineString colHeader)) -> let
       (indices, colNames) = unzip [(i, col) | (i, col) <- zip [0..] allCols, colNameFilter col]
       filterCols = if
@@ -393,7 +389,7 @@ columnsSource ColumnParams{..} source = (source $$+ headC) >>= \case
       in return (ColumnInfo{..}, resum $=+ mapC (filterCols . readTsvBs . unLineString))
 
 catWithHeaderC :: Monad m
-  => Env ByteString -> [(Maybe LineBS, Source m ByteString)] -> Source m ByteString
+  => Env ByteString -> [(Maybe LineBS, ConduitT () ByteString m ())] -> ConduitT () ByteString m ()
 catWithHeaderC env@Env{..} headersSources = case optsSubrec envOpts of
   [] -> do
     yieldManyWithEOL header1
@@ -413,6 +409,9 @@ preprocessHeader env@Env{..} mheader = cut <$> mheader
   where
   cut = getSubrec env (optsSubrec envOpts)
 
-preprocessC env@Env{..} mheader source = mapOutput cut source
+preprocessC :: Monad m => Env ByteString -> p
+  -> ConduitT i (LineString ByteString) m r
+  -> ConduitT i (LineString ByteString) m r
+preprocessC env@Env{..} _mheader source = mapOutput cut source
   where
   cut = getSubrec env (optsSubrec envOpts)

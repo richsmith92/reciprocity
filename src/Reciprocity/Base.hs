@@ -6,7 +6,7 @@ module Reciprocity.Base where
 import ReciprocityPrelude
 import qualified Data.ByteString as B
 -- import qualified Data.ByteString.Unsafe as B
-import Reciprocity.Internal
+-- import Reciprocity.Internal
 
 data Opts = Opts {
   optsSep        :: Text,
