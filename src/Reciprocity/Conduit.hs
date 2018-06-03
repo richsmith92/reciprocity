@@ -153,6 +153,7 @@ joinCE jopts@JoinOpts{..} [ConduitT !left0, ConduitT !right0] = ConduitT $ \rest
   where
   finishL = map (\rec -> joinCombine [joinKey rec, joinValue rec, mempty]) . fromList
   finishR = map (\rec -> joinCombine [joinKey rec, mempty, joinValue rec]) . fromList
+joinCE _ _ = error "joinCE: Expecting exactly 2 conduits!"
   -- [ConduitT !left0, ConduitT !right0] = map (mapOutput $ map joinKeyValue) inputs
   -- finishL = map (\(k,v) -> joinCombine [k, v, mempty]) . fromList
   -- finishR = map (\(k,v) -> joinCombine [k, mempty, v]) . fromList
