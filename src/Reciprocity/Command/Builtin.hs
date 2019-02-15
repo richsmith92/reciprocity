@@ -155,7 +155,7 @@ instance IsCommand CmdSplit where
 -- * Replace
 
 data CmdReplace = CmdReplace {
-  replaceDictFile :: FilePath,
+  replaceDictFiles :: [FilePath],
   replaceSubrec, replaceDictKey, replaceDictValue :: Subrec,
   replaceDelete :: Bool
   } deriving Show
@@ -163,22 +163,19 @@ instance IsCommand CmdReplace where
   commandInfo = CmdInfo {
     cmdDesc = "Replace subrecord using dictionary",
     cmdParser = do
-      replaceDictFile <- fileOpt $ long "dict" ++ help "Dictionary file"
+      -- replaceDictFile <- fileOpt $ long "dict" ++ help "Dictionary file"
       replaceDictKey <- subrecOpt $ long "key" ++ short 'k' ++ help "Dict key subrecord"
-        -- ++ value (singleField 0))
       replaceDictValue <- subrecOpt $ long "val" ++ help "Dict value subrecord"
-        -- ++ value (singleField 1))
-      replaceSubrec <- subrecOpt $ long "sub" ++ help "Subrecord to replace"
+      replaceSubrec <- subrecOpt $ short 'i' ++ help "Subrecord to replace"
       replaceDelete <- switch $ long "delete" ++ short 'd' ++ help "Delete lines with subrecords not in dictionary"
+      replaceDictFiles <- some $ argument str $ metavar "DICT_FILE..."
       return CmdReplace{..}
     }
 
   runCommand (CmdReplace{..}) = do
     env <- ask
     let sub = subrec env replaceSubrec
-    dict <- runConduitRes $ sourceFile replaceDictFile .| linesCE .| foldlCE
-      (\m s -> uncurry insertMap (getKeyValue env replaceDictKey replaceDictValue s) m)
-      (asHashMap mempty)
+    dict <- mconcat <$> (runConduitRes $ mapM (getDict env) replaceDictFiles)
     runConduitRes $ withInputSourcesH env $ \headersSources -> let
       ((mheader:_), sources) = unzip headersSources in
       (do
@@ -186,3 +183,7 @@ instance IsCommand CmdReplace where
         sequence_ [ s .| linesCE .| dictReplaceCE replaceDelete dict sub .| unlinesCE
                   | s <- sources]
       ) .| stdoutC
+    where
+    getDict env dictFile = sourceFile dictFile .| linesCE .| foldlCE
+      (\m s -> uncurry insertMap (getKeyValue env replaceDictKey replaceDictValue s) m)
+      (asHashMap mempty)
