@@ -4,17 +4,11 @@ import ReciprocityPrelude
 import Reciprocity.Base
 import Reciprocity.Record
 import Reciprocity.Command.Base
--- import Reciprocity.Hint
--- import Reciprocity.Compile
+
 import Data.Char (isSpace)
 import Data.Conduit.Internal (zipSources)
 
--- import           System.Directory             (getHomeDirectory)
 import Data.Text          (replace)
--- import Data.Conduit.Zlib  (gzip)
--- import Data.List.Extra    (groupSort)
--- import System.IO          (IOMode (..), withBinaryFile)
--- import System.Process
 
 -- * Cat
 
@@ -29,7 +23,6 @@ instance IsCommand CmdCat where
 
   runCommand _ = do
     env <- ask
-    -- liftIO $ runConduitRes $ withInputSourcesH env $ \hsources -> catWithHeaderC env hsources .| stdoutC
     liftIO $ runConduitRes $ withInputSourcesH env $ \hsources -> catWithHeaderC env hsources .| stdoutC
 
 -- * Merge
@@ -84,7 +77,6 @@ instance IsCommand CmdJoin where
       joinOuterRight = cmdJoinOuterRight,
       joinKey = getSubrec env cmdJoinKey,
       joinValue = getSubrec env cmdJoinValue,
-      -- joinKeyValue = getKeyValue env cmdJoinKey cmdJoinValue,
       joinCombine = case cmdJoinKey of
         [] -> headEx
         _  -> \(map unLineString -> [k,v1,v2]) -> LineString $ k ++ envSep ++ v1 ++ envSep ++ v2
@@ -137,7 +129,6 @@ instance IsCommand CmdSplit where
         help "MapReduce partition mode: split into buckets determined by hash of the key")
       splitMkdir <- switch (long "mkdir" ++ help "Create directories for output files")
       splitCompress <- switch (long "compress" ++ short 'z' ++ help "Compress output with gzip")
-      -- splitGreedy <- switch (long "greedy" ++ help "Instead of streaming, read all input file into memory")
       splitBuckets <- natOpt
         (long "buckets" ++ help "Number of buckets" ++ value 1)
       splitTemplate <- textOpt id (long "out" ++ value "{s}.{filename}" ++ help "Output filepath template (appended to input filename)")

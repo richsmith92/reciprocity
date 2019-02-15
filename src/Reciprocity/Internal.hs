@@ -5,14 +5,12 @@
 module Reciprocity.Internal where
 
 import qualified Data.ByteString as B
--- import qualified Data.ByteString.Unsafe as B
 import qualified Data.ByteString.Internal as B
-import           Foreign.C.Types
--- import Foreign.Ptr
+import Foreign.C.Types
 import Foreign.ForeignPtr
 import Foreign.Storable
 import Foreign.Marshal.Array
-import           System.IO.Unsafe (unsafePerformIO)
+import System.IO.Unsafe (unsafePerformIO)
 import Data.Int
 import Data.Word
 import Foreign.Ptr

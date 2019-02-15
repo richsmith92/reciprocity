@@ -8,7 +8,6 @@ import Reciprocity.Base
 import Reciprocity.Conduit
 
 import Options.Applicative
-import           System.Directory             (getHomeDirectory)
 
 data CmdInfo c = CmdInfo {
   cmdDesc   :: Text,
@@ -46,14 +45,12 @@ natOpt mods = option auto (mods ++ metavar "N")
 subrecOpt :: Mod OptionFields FieldRange -> Parser [FieldRange]
 subrecOpt mods = many $ fieldRangeOpt mods
 
--- fieldRangeOpt :: OptParser Subrec
 fieldRangeOpt :: OptParser FieldRange
 fieldRangeOpt mods = textOpt (parse . splitSeq "-") (mods ++ metavar "SUBREC")
   where
   parse :: [String] -> FieldRange
   parse = \case
     [i] ->     (field i,field i)
-    -- ["",""] -> []
     ["", i] -> (Nothing, field i)
     [i, ""] -> (field i, Nothing)
     [i, j] ->  (field i, field j)
@@ -68,8 +65,3 @@ valueOpt = subrecOpt (long "val" ++ short 'v' ++ help "Value subrecord")
 
 funOpt :: Mod OptionFields Text -> Parser Text
 funOpt mods = textOpt id (mods ++ metavar "FUN" ++ value "")
-
--- * directory stuff
-
-getRootDir :: IO FilePath
-getRootDir = (</> ".reciprocity") <$> getHomeDirectory

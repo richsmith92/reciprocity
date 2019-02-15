@@ -11,8 +11,6 @@ import qualified Data.ByteString.Lazy as BL
 import qualified Data.Conduit.Binary   as CB
 import           Data.Conduit.Zlib     (ungzip)
 import           System.IO             (IOMode (..), withBinaryFile)
--- import Control.Monad.Trans.Maybe (MaybeT(..))
--- import qualified Data.Vector as V
 import           Data.These      (These (..))
 
 import           Data.Conduit.Internal (ConduitT (..), Pipe (..))
@@ -39,7 +37,7 @@ useHeader c = awaitJust $ \h -> yield h >> c h
 
 dropHeader :: Monad m => ConduitT LineBS LineBS m ()
 dropHeader = do
-  awaitJust $ \_h -> return () -- when (not $ "id" `isPrefixOf` unLineString h) (leftover h)
+  awaitJust $ \_h -> return ()
   awaitForever yield
 
 concatWithHeaders :: Monad m => [ConduitT a LineBS m ()] -> ConduitT a LineBS m ()
@@ -54,8 +52,6 @@ produceZip overwrite outFile source = do
         return [pack $ "Output file exists, skipping: " ++ outFile]
      | otherwise -> do
         unless exists $ createDirectoryIfMissing True (takeDirectory outFile)
-        -- path <- resolveFile' outFile
-        -- entryName <- setFileExtension "txt" $ filename path
         entrySel <- mkEntrySelector $ takeBaseName outFile ++ ".txt"
         createArchive outFile $ sinkEntry Deflate source entrySel
         return []
@@ -86,11 +82,6 @@ inputFiles Env{..} = case optsInputs envOpts of
   inputs -> replaceElem "-" "" inputs
 
 -- | Yield all input lines, adding newline to the end of each.
--- yieldManyWithEOL :: (Element mono ~ LineBS, MonoFoldable mono, Monad m) =>
-  -- mono -> ConduitT i ByteString m ()
--- yieldManyWithEOL    :: (Element a ~ LineString ByteString, MonoFoldable a, Monad m) =>
-     -- a -> ConduitT i ByteString m ()
-
 yieldManyWithEOL :: (Element mono ~ LineBS, Monad m, MonoFoldable mono) =>
      mono -> ConduitT i ByteString m ()
 yieldManyWithEOL = mapM_ (yield . unLineStringEOL)
@@ -124,7 +115,6 @@ withHeader Env{..} source f = if
 data JoinOpts rec sub out = JoinOpts {
   joinOuterLeft, joinOuterRight :: Bool,
   joinKey, joinValue :: LineString rec -> LineString sub,
---  joinKeyValue :: rec -> (sub,sub),
   joinCombine :: [LineString sub] -> out
   }
 

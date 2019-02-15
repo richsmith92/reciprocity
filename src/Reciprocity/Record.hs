@@ -16,7 +16,6 @@ joinTsvFields = LineString . showTsv
 -- | strip 'LineString' newtype and append EOL char
 unLineStringEOL :: LineBS -> ByteString
 unLineStringEOL = (`snoc` c2w '\n') . unLineString
--- Conduit utils
 
 maybeAddEOL :: ByteString -> Maybe ByteString
 maybeAddEOL = nonempty Nothing (Just . (`snoc` c2w '\n'))
@@ -56,7 +55,7 @@ subrec Env{..} sub = if
   | [r] <- sub, [sep] <- toList envSep -> subLens sep (bounds r) -- . iso LineString unLineString
   -- | [r] <- sub, [sep] <- toList envSep -> iso unLineString LineString . subLens sep (bounds r)
   | otherwise -> error "Multiple ranges and multibyte separators not implemented yet"
---
+
 -- {-# INLINE subrec' #-}
 -- subrec' Env{..} (start, end) = case toList envSep of
 --   [c] -> c_subrec c (start, end)
@@ -64,7 +63,6 @@ subrec Env{..} sub = if
 --   _ -> envIntercalate . take (end - start) . drop start . envSplit
 
 {-# INLINE subLens #-}
--- subLens :: Word8 -> (Int, Int) -> Lens' B.ByteString B.ByteString
 subLens :: Word8 -> (Int, Int) -> Lens' LineBS LineBS
 subLens sep bounds = \f (LineString str) -> let sub = getSub sep bounds str in
   LineString . (\sub' -> replaceSub sub sub' str) . unLineString <$> f (LineString sub)
