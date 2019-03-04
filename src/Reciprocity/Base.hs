@@ -34,7 +34,7 @@ data Env s = Env {
 type StringLike s = (s ~ ByteString)
 
 -- | String without newline
-newtype LineString s = LineString { unLineString :: s } deriving (Show, Eq, Ord, Monoid, Generic)
+newtype LineString s = LineString { unLineString :: s } deriving (Show, Eq, Ord, Semigroup, Monoid, Generic)
 type LineBS = LineString ByteString
 
 instance (t ~ LineString a') => Rewrapped (LineString a) t
