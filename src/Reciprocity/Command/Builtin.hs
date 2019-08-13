@@ -154,36 +154,43 @@ instance IsCommand CmdSplit where
 
 -- * Replace
 
-data CmdReplace = CmdReplace {
-  replaceDictFiles :: [FilePath],
-  replaceSubrec, replaceDictKey, replaceDictValue :: Subrec,
-  replaceDelete :: Bool
+data CmdLookup = CmdLookup {
+  lookupDictFiles :: [FilePath],
+  lookupInputSubrec, lookupKey, lookupReplacement :: Subrec,
+  lookupKeep :: Bool
   } deriving Show
-instance IsCommand CmdReplace where
+instance IsCommand CmdLookup where
   commandInfo = CmdInfo {
-    cmdDesc = "Replace subrecord using dictionary",
+    cmdDesc = "Intersect with keyset, or replace subrecord using key-value dict",
     cmdParser = do
-      -- replaceDictFile <- fileOpt $ long "dict" ++ help "Dictionary file"
-      replaceDictKey <- subrecOpt $ long "key" ++ short 'k' ++ help "Dict key subrecord"
-      replaceDictValue <- subrecOpt $ long "val" ++ help "Dict value subrecord"
-      replaceSubrec <- subrecOpt $ short 'i' ++ help "Subrecord to replace"
-      replaceDelete <- switch $ long "delete" ++ short 'd' ++ help "Delete lines with subrecords not in dictionary"
-      replaceDictFiles <- some $ argument str $ metavar "DICT_FILE..."
-      return CmdReplace{..}
+      lookupInputSubrec <- subrecOpt $ short 'i' ++ help "Input subrecord to lookup"
+      lookupKey <- subrecOpt $ long "key" ++ short 'k' ++ help "Key subrecord in dict/keyset files"
+      lookupReplacement <- subrecOpt $ long "val" ++ short 'v' ++
+        help "Value subrecord in dict file. If not set, no replacement is performed."
+      lookupKeep <- switch $ long "outer" ++
+        help "In replacement mode, keep all unmatched input records"
+      lookupDictFiles <- some $ argument str $ metavar "DICT_FILE..."
+      return CmdLookup{..}
     }
 
-  runCommand (CmdReplace{..}) = do
+  runCommand (CmdLookup{..}) = do
     env <- ask
-    let sub = subrec env replaceSubrec
-    dict <- mconcat <$> (runConduitRes $ mapM (getDict env) replaceDictFiles)
+    c <- if null lookupReplacement
+      then do
+        -- TODO: replace dict with set?
+        dict <- mconcat <$> (runConduitRes $ mapM (getDict env) lookupDictFiles)
+        return $ filterCE $ (`member` keysSet dict) . getSubrec env lookupInputSubrec
+      else do
+        dict <- mconcat <$> (runConduitRes $ mapM (getDict env) lookupDictFiles)
+        let inputSub = subrec env lookupInputSubrec
+        return $ dictReplaceCE lookupKeep dict inputSub
     runConduitRes $ withInputSourcesH env $ \headersSources -> let
       ((mheader:_), sources) = unzip headersSources in
       (do
         yieldManyWithEOL mheader
-        sequence_ [ s .| linesCE .| dictReplaceCE replaceDelete dict sub .| unlinesCE
-                  | s <- sources]
+        sequence_ [ s .| linesCE .| c .| unlinesCE | s <- sources]
       ) .| stdoutC
     where
-    getDict env dictFile = sourceFile dictFile .| linesCE .| foldlCE
-      (\m s -> uncurry insertMap (getKeyValue env replaceDictKey replaceDictValue s) m)
+    getDict env file = sourceFile file .| linesCE .| foldlCE
+      (\m s -> uncurry insertMap (getKeyValue env lookupKey lookupReplacement s) m)
       (asHashMap mempty)

@@ -215,9 +215,9 @@ lineChunksC = await >>= maybe (return ()) go
 
 dictReplaceCE :: (MapValue map ~ k, ContainerKey map ~ k, IsMap map, Monad m) =>
   Bool -> map -> ALens s b k k -> ConduitT [s] [b] m ()
-dictReplaceCE delete dict subrec = if
-  | delete -> mapC $ mapMaybe $ cloneLens subrec $ \x -> lookup x dict
-  | otherwise -> mapCE $ cloneLens subrec %~ \x -> fromMaybe x $ lookup x dict
+dictReplaceCE keep dict subrec = if
+  | keep -> mapCE $ cloneLens subrec %~ \x -> fromMaybe x $ lookup x dict
+  | otherwise -> mapC $ mapMaybe $ cloneLens subrec $ \x -> lookup x dict
 
 subrecFilterCE :: (IsSequence b, Monad m) => (a -> Bool) -> Getting a (Element b) a -> ConduitT b b m ()
 subrecFilterCE p subrec = mapC $ filter $ p . view subrec

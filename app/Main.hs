@@ -27,7 +27,7 @@ commandParser = subparser (mconcat
   , sub "merge"  (commandInfo :: CmdInfo CmdMerge)
   , sub "join" (commandInfo :: CmdInfo CmdJoin)
   , sub "cat" (commandInfo :: CmdInfo CmdCat)
-  , sub "replace" (commandInfo :: CmdInfo CmdReplace)
+  , sub "lookup" (commandInfo :: CmdInfo CmdLookup)
   , sub "diff" (commandInfo :: CmdInfo CmdDiff)
   ])
   where
