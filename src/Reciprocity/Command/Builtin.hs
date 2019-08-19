@@ -157,7 +157,8 @@ instance IsCommand CmdSplit where
 data CmdLookup = CmdLookup {
   lookupDictFiles :: [FilePath],
   lookupInputSubrec, lookupKey, lookupReplacement :: Subrec,
-  lookupKeep :: Bool
+  lookupKeep :: Bool,
+  lookupInvert :: Bool
   } deriving Show
 instance IsCommand CmdLookup where
   commandInfo = CmdInfo {
@@ -169,6 +170,8 @@ instance IsCommand CmdLookup where
         help "Value subrecord in dict file. If not set, no replacement is performed."
       lookupKeep <- switch $ long "outer" ++
         help "In replacement mode, keep all unmatched input records"
+      lookupInvert <- switch $ short 'c' ++ long "invert" ++
+        help "Select only non-matching lines (set complement)"
       lookupDictFiles <- some $ argument str $ metavar "DICT_FILE..."
       return CmdLookup{..}
     }
@@ -179,7 +182,8 @@ instance IsCommand CmdLookup where
       then do
         -- TODO: replace dict with set?
         dict <- mconcat <$> (runConduitRes $ mapM (getDict env) lookupDictFiles)
-        return $ filterCE $ (`member` keysSet dict) . getSubrec env lookupInputSubrec
+        let p = (if lookupInvert then not else id) . (`member` keysSet dict)
+        return $ filterCE $ p . getSubrec env lookupInputSubrec
       else do
         dict <- mconcat <$> (runConduitRes $ mapM (getDict env) lookupDictFiles)
         let inputSub = subrec env lookupInputSubrec
